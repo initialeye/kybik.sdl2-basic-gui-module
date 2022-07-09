@@ -152,7 +152,7 @@ fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.Strin
     if (parentWidget != null) {
         const cwgt = WidgetFactory.create(win, nameId.from());
         const pwgt = @ptrCast(*Widget, parentWidget);
-        const res = pwgt.vptr.add_child(pwgt.inst, cwgt);
+        const res = pwgt.add_child(cwgt);
         return @ptrCast(Gui.WidPtr, res);
     } else {
         const cwgt = WidgetFactory.create(win, nameId.from());
@@ -164,52 +164,52 @@ fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.Strin
 fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
     if(idx > 1) return false;
     var w = @ptrCast(*Widget, widget);
-    var anchor = w.vptr.get_anchor(w.inst);
+    var anchor = w.get_anchor();
     anchor.b[idx] = Widget.Binding{
         .par = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
         .cur = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
     };
-    w.vptr.set_anchor(w.inst, anchor);
+    w.set_anchor(anchor);
     return true;
 }
 
 fn reset_widget_junction_point(widget: Gui.WidPtr, idx: u8) callconv(.C) bool {
     if(idx > 1) return false;
     var w = @ptrCast(*Widget, widget);
-    const bind = w.vptr.get_anchor(w.inst).b[@intCast(u1, idx) +% 1];
+    const bind = w.get_anchor().b[@intCast(u1, idx) +% 1];
     const anchor = Widget.Anchor{ .b = .{ bind, bind } };
-    w.vptr.set_anchor(w.inst, anchor);
+    w.set_anchor(anchor);
     return true;
 }
 
 fn set_widget_property_str(widget: Gui.WidPtr, name: Fw.String, value: Fw.String) callconv(.C) bool {
     var w = @ptrCast(*Widget, widget);
-    return w.vptr.set_property_str(w.inst, name.from(), value.from());
+    return w.set_property_str(name.from(), value.from());
 }
 
 fn set_widget_property_int(widget: Gui.WidPtr, name: Fw.String, value: i64) callconv(.C) bool {
     var w = @ptrCast(*Widget, widget);
-    return w.vptr.set_property_int(w.inst, name.from(), value);
+    return w.set_property_int(name.from(), value);
 }
 
 fn set_widget_property_flt(widget: Gui.WidPtr, name: Fw.String, value: f64) callconv(.C) bool {
     var w = @ptrCast(*Widget, widget);
-    return w.vptr.set_property_flt(w.inst, name.from(), value);
+    return w.set_property_flt(name.from(), value);
 }
 
 fn get_widget_property_str(widget: Gui.WidPtr, name: Fw.String) callconv(.C) Fw.String {
     var w = @ptrCast(*Widget, widget);
-    return Fw.String.init(w.vptr.get_property_str(w.inst, name.from()));
+    return Fw.String.init(w.get_property_str(name.from()));
 }
 
 fn get_widget_property_int(widget: Gui.WidPtr, name: Fw.String) callconv(.C) i64 {
     var w = @ptrCast(*Widget, widget);
-    return w.vptr.get_property_int(w.inst, name.from());
+    return w.get_property_int(name.from());
 }
 
 fn get_widget_property_flt(widget: Gui.WidPtr, name: Fw.String) callconv(.C) f64 {
     var w = @ptrCast(*Widget, widget);
-    return w.vptr.get_property_flt(w.inst, name.from());
+    return w.get_property_flt(name.from());
 }
 
 fn handle_events_task(ctx: Fw.CbCtx) callconv(.C) void {
@@ -267,7 +267,7 @@ pub const MainWindow = struct {
     
     fn destroy(this: *MainWindow) void {
         for (this.c.items) |item| {
-            item.vptr.destroy(item.inst);
+            item.destroy();
         }
         this.c.deinit(allocator);
         this.r.destroy();
@@ -289,9 +289,9 @@ pub const MainWindow = struct {
         _ = this;
         _ = pos;
         for (this.c.items) |item| {
-            const area = item.vptr.get_area(item.inst);
+            const area = item.get_area();
             if (pos.inside(area)) {
-                item.vptr.handle_mouse_click(item.inst, pos);
+                item.handle_mouse_click(pos);
                 break;
             }
         }
@@ -301,9 +301,9 @@ pub const MainWindow = struct {
         this.r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch unreachable;
         const currArea = this.r.getViewport();
         for (this.c.items) |item| {
-            const targArea = item.vptr.get_area(item.inst);
+            const targArea = item.get_area();
             this.r.setViewport(targArea) catch unreachable;
-            item.vptr.update(item.inst, this.r) catch unreachable;
+            item.update(this.r) catch unreachable;
         }
         this.r.setViewport(currArea) catch unreachable;
         this.r.present();
@@ -433,7 +433,7 @@ pub const Widget = struct {
             fn destroy(inst: IPtr) void {
                 var this = @ptrCast(*T, inst);
                 for (this.b.children.items) |item| {
-                    item.vptr.destroy(item.inst);
+                    item.destroy();
                 }
                 this.b.children.deinit(allocator);
                 return this.*.destroy();
@@ -492,9 +492,9 @@ pub const Widget = struct {
                 const currArea = rend.getViewport();
                 try this.update(rend);
                 for (this.b.children.items) |item| {
-                    const targArea = item.vptr.get_anchor(item.inst).get_destination_area(currSize);
+                    const targArea = item.get_anchor().get_destination_area(currSize);
                     try rend.setViewport(targArea);
-                    item.vptr.update(item.inst, rend) catch unreachable;
+                    item.update(rend) catch unreachable;
                 }
                 try rend.setViewport(currArea);
             }
@@ -503,6 +503,52 @@ pub const Widget = struct {
                 this.handle_mouse_click(pos);
             }
         };
+    }
+    
+    fn destroy(wid: Widget) void {
+        return wid.vptr.destroy(wid.inst);
+    }
+    fn add_child(wid: Widget, child: Widget) *Widget {
+        return wid.vptr.add_child(wid.inst, child);
+    }
+    fn set_action(wid: Widget, name: []const u8, action: Fw.Action) bool {
+        return wid.vptr.set_action(wid.inst, name, action);
+    }
+    fn set_anchor(wid: Widget, anchor: Anchor) void {
+        return wid.vptr.set_anchor(wid.inst, anchor);
+    }
+    fn get_anchor(wid: Widget) Anchor {
+        return wid.vptr.get_anchor(wid.inst);
+    }
+    fn get_size(wid: Widget) Render.Size {
+        return wid.vptr.get_size(wid.inst);
+    }
+    fn get_area(wid: Widget) Render.IRect {
+        return wid.vptr.get_area(wid.inst);
+    }
+    fn set_property_str(wid: Widget, name: []const u8, value: []const u8) bool {
+        return wid.vptr.set_property_str(wid.inst, name, value);
+    }
+    fn set_property_int(wid: Widget, name: []const u8, value: i64) bool {
+        return wid.vptr.set_property_int(wid.inst, name, value);
+    }
+    fn set_property_flt(wid: Widget, name: []const u8, value: f64) bool {
+        return wid.vptr.set_property_flt(wid.inst, name, value);
+    }
+    fn get_property_str(wid: Widget, name: []const u8) []const u8 {
+        return wid.vptr.get_property_str(wid.inst, name);
+    }
+    fn get_property_int(wid: Widget, name: []const u8) i64 {
+        return wid.vptr.get_property_int(wid.inst, name);
+    }
+    fn get_property_flt(wid: Widget, name: []const u8) f64 {
+        return wid.vptr.get_property_flt(wid.inst, name);
+    }
+    fn update(wid: Widget, rend: Render.Renderer) Render.Error!void {
+        return wid.vptr.update(wid.inst, rend);
+    }
+    fn handle_mouse_click(wid: Widget, pos: Render.IPoint) void {
+        return wid.vptr.handle_mouse_click(wid.inst, pos);
     }
 
     vptr: VPtr,
