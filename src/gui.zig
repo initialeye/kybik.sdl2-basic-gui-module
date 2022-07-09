@@ -305,6 +305,25 @@ pub const Widget = struct {
         update:           fn (IPtr, Render.Renderer) Render.Error!void,
 
         handle_mouse_click: fn (IPtr, Render.IPoint) void,
+        
+        pub fn generate(T: anytype) Virtual {
+            return Virtual{
+                .destroy          = Widget.Funcs(T).destroy,
+                .add_child        = Widget.Funcs(T).add_child,
+                .set_action       = Widget.Funcs(T).set_action,
+                .get_anchor       = Widget.Funcs(T).get_anchor,
+                .get_size         = Widget.Funcs(T).get_size,
+                .get_area         = Widget.Funcs(T).get_area,
+                .set_property_str = Widget.Funcs(T).set_property_str,
+                .set_property_int = Widget.Funcs(T).set_property_int,
+                .set_property_flt = Widget.Funcs(T).set_property_flt,
+                .get_property_str = Widget.Funcs(T).get_property_str,
+                .get_property_int = Widget.Funcs(T).get_property_int,
+                .get_property_flt = Widget.Funcs(T).get_property_flt,
+                .update           = Widget.Funcs(T).update,
+                .handle_mouse_click = Widget.Funcs(T).handle_mouse_click,
+            };
+        }
     };
     
     const Binding = struct {
@@ -471,22 +490,7 @@ const Button = struct {
         click: Fw.Action = undefined,
     };
 
-    const virtual = Widget.Virtual{
-        .destroy          = Widget.Funcs(Button).destroy,
-        .add_child        = Widget.Funcs(Button).add_child,
-        .set_action       = Widget.Funcs(Button).set_action,
-        .get_anchor       = Widget.Funcs(Button).get_anchor,
-        .get_size         = Widget.Funcs(Button).get_size,
-        .get_area         = Widget.Funcs(Button).get_area,
-        .set_property_str = Widget.Funcs(Button).set_property_str,
-        .set_property_int = Widget.Funcs(Button).set_property_int,
-        .set_property_flt = Widget.Funcs(Button).set_property_flt,
-        .get_property_str = Widget.Funcs(Button).get_property_str,
-        .get_property_int = Widget.Funcs(Button).get_property_int,
-        .get_property_flt = Widget.Funcs(Button).get_property_flt,
-        .update           = Widget.Funcs(Button).update,
-        .handle_mouse_click = Widget.Funcs(Button).handle_mouse_click,
-    };
+    const virtual = Widget.Virtual.generate(Button);
 
     fn create(rend: Render.Renderer) Widget {
         var button = allocator.create(Button) catch unreachable;
