@@ -19,6 +19,8 @@ pub const Virtual = extern struct {
     create_window: fn(Fw.String) callconv(.C) WinPtr,
     update_window: fn(WinPtr) callconv(.C) void,
     create_widget: fn(WinPtr, ?WidPtr, Fw.String) callconv(.C) ?WidPtr,
+    set_widget_junction_point: fn(WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool,
+    reset_widget_junction_point: fn(WidPtr, u8) callconv(.C) bool,
     set_widget_property_str: fn(WidPtr, Fw.String, Fw.String) callconv(.C) bool,
     set_widget_property_int: fn(WidPtr, Fw.String, i64) callconv(.C) bool,
     set_widget_property_flt: fn(WidPtr, Fw.String, f64) callconv(.C) bool,

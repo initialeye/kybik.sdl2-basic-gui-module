@@ -54,6 +54,8 @@ const vptr = Gui.Virtual {
     .create_window = create_window,
     .update_window = update_window,
     .create_widget = create_widget,
+    .set_widget_junction_point = set_widget_junction_point,
+    .reset_widget_junction_point = reset_widget_junction_point,
     .set_widget_property_str = set_widget_property_str,
     .set_widget_property_int = set_widget_property_int,
     .set_widget_property_flt = set_widget_property_flt,
@@ -157,6 +159,27 @@ fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.Strin
         const res = win.add_child(cwgt);
         return @ptrCast(Gui.WidPtr, res);
     }
+}
+
+fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
+    if(idx > 1) return false;
+    var w = @ptrCast(*Widget, widget);
+    var anchor = w.vptr.get_anchor(w.inst);
+    anchor.b[idx] = Widget.Binding{
+        .par = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
+        .cur = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
+    };
+    w.vptr.set_anchor(w.inst, anchor);
+    return true;
+}
+
+fn reset_widget_junction_point(widget: Gui.WidPtr, idx: u8) callconv(.C) bool {
+    if(idx > 1) return false;
+    var w = @ptrCast(*Widget, widget);
+    const bind = w.vptr.get_anchor(w.inst).b[@intCast(u1, idx) +% 1];
+    const anchor = Widget.Anchor{ .b = .{ bind, bind } };
+    w.vptr.set_anchor(w.inst, anchor);
+    return true;
 }
 
 fn set_widget_property_str(widget: Gui.WidPtr, name: Fw.String, value: Fw.String) callconv(.C) bool {
@@ -293,8 +316,9 @@ pub const Widget = struct {
         destroy:          fn (IPtr) void,
         add_child:        fn (IPtr, Widget) *Widget,
         set_action:       fn (IPtr, []const u8, Fw.Action) bool,
-        get_size:         fn (IPtr) Render.Size,
+        set_anchor:       fn (IPtr, Anchor) void,
         get_anchor:       fn (IPtr) Anchor,
+        get_size:         fn (IPtr) Render.Size,
         get_area:         fn (IPtr) Render.IRect,
         set_property_str: fn (IPtr, []const u8, []const u8) bool,
         set_property_int: fn (IPtr, []const u8, i64) bool,
@@ -311,6 +335,7 @@ pub const Widget = struct {
                 .destroy          = Widget.Funcs(T).destroy,
                 .add_child        = Widget.Funcs(T).add_child,
                 .set_action       = Widget.Funcs(T).set_action,
+                .set_anchor       = Widget.Funcs(T).set_anchor,
                 .get_anchor       = Widget.Funcs(T).get_anchor,
                 .get_size         = Widget.Funcs(T).get_size,
                 .get_area         = Widget.Funcs(T).get_area,
@@ -421,13 +446,17 @@ pub const Widget = struct {
                 var this = @ptrCast(*T, inst);
                 return this.set_action(name, action);
             }
-            fn get_size(inst: IPtr) Render.Size {
+            fn set_anchor(inst: IPtr, anchor: Anchor) void {
                 const this = @ptrCast(*T, inst);
-                return this.b.size;
+                this.b.anchor = anchor;
             }
             fn get_anchor(inst: IPtr) Anchor {
                 const this = @ptrCast(*T, inst);
                 return this.b.anchor;
+            }
+            fn get_size(inst: IPtr) Render.Size {
+                const this = @ptrCast(*T, inst);
+                return this.b.size;
             }
             fn get_area(inst: IPtr) Render.IRect {
                 const this = @ptrCast(*T, inst);
