@@ -72,6 +72,29 @@ export fn load() *const Fw.ModuleHeader {
     return &HEADER;
 }
 
+const Error = error {
+    OutOfMemory,
+    RenderFailed,
+};
+
+fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
+    _ = src;
+    switch (e) {
+        else => return,
+    }
+    _ = optMsg;
+}
+
+fn convert_sdl2_error(e: Render.Error) Error {
+    return switch(e) {
+        Render.Error.InitFailed,
+        Render.Error.CreateFailed,
+        Render.Error.RenderFailed,
+        Render.Error.LoadFailed,
+        Render.Error.InvalidData => Error.RenderFailed,
+    };
+}
+
 const funcs = Fw.Functions {
     .init = init,
     .quit = quit,
@@ -92,9 +115,15 @@ fn init(corePtr: *const Fw.Core, thisPtr: Fw.Module) callconv(.C) void {
     Render.init();
     resources = core.get_resource_path(module).from();
     var paths = [_][]const u8 { resources, "test.ttf", };
-    const fontPath = std.fs.path.joinZ(allocator, paths[0..]) catch unreachable;
+    const fontPath = std.fs.path.joinZ(allocator, paths[0..]) catch {
+        handle_error(Error.OutOfMemory, @src(), "");
+        return;
+    };
     defer allocator.free(fontPath);
-    font = Render.Font.create(fontPath, 20) catch unreachable;
+    font = Render.Font.create(fontPath, 20) catch |e| {
+        handle_error(convert_sdl2_error(e), @src(), "");
+        return;
+    };
 }
 
 fn run() callconv(.C) void {
@@ -130,33 +159,59 @@ fn handle(inf: *const Fw.Interface, evid: u64) callconv(.C) void {
     _ = evid;
 }
 
-fn create_window(title: Fw.String) callconv(.C) Gui.WinPtr {
-    var res = MainWindow.create(title.from());
-    windows.append(allocator, res) catch unreachable;
+fn create_window(title: Fw.String) callconv(.C) ?Gui.WinPtr {
+    var res = MainWindow.create(title.from()) catch |e| {
+        handle_error(e, @src(), "");
+        return null;
+    };
+    windows.append(allocator, res) catch handle_error(Error.OutOfMemory, @src(), "");
     if (textureInitialized == false) {
         const size = Render.Size{ .x = 128, .y = 64, };
-        const surf = Render.drawButtonTemplate(size) catch unreachable;
+        const surf = Render.drawButtonTemplate(size) catch |e| {
+            handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
+            return @ptrCast(Gui.WinPtr, res);
+        };
         defer surf.destroy();
-        buttonTemplate = Render.Texture.createSurface(res.r, surf) catch unreachable;
+        buttonTemplate = Render.Texture.createSurface(res.r, surf) catch |e| {
+            handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
+            return @ptrCast(Gui.WinPtr, res);
+        };
+        textureInitialized = true;
     }
     return @ptrCast(Gui.WinPtr, res);
 }
 
 fn update_window(window: Gui.WinPtr) callconv(.C) void {
     var w = @ptrCast(*MainWindow, window);
-    w.update();
+    w.update() catch |e| {
+        handle_error(e, @src(), "");
+    };
 }
 
 fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.String) callconv(.C) ?Gui.WidPtr {
     var win = @ptrCast(*MainWindow, winPtr);
     if (parentWidget != null) {
-        const cwgt = WidgetFactory.create(win, nameId.from());
+        const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
+            handle_error(e, @src(), "");
+            return null;
+        };
         const pwgt = @ptrCast(*Widget, parentWidget);
-        const res = pwgt.add_child(cwgt);
+        const res = pwgt.add_child(cwgt) catch |e| {
+            cwgt.destroy();
+            handle_error(e, @src(), "");
+            return null;
+        };
         return @ptrCast(Gui.WidPtr, res);
     } else {
-        const cwgt = WidgetFactory.create(win, nameId.from());
-        const res = win.add_child(cwgt);
+        const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
+            handle_error(e, @src(), "");
+            return null;
+        };
+        const res = win.add_child(cwgt) catch |e| {
+            cwgt.destroy();
+            handle_error(e, @src(), "");
+            return null;
+        };
         return @ptrCast(Gui.WidPtr, res);
     }
 }
@@ -226,7 +281,9 @@ fn update(ctx: Fw.CbCtx) callconv(.C) void {
     _ = ctx;
     const startTime = core.nanotime();
     for (windows.items) |w| {
-        w.update();
+        w.update() catch |e| {
+            handle_error(e, @src(), "");
+        };
     }
     core.schedule_task(module, update, startTime + 30_000_000, ctx);
 }
@@ -242,7 +299,7 @@ pub fn mouse_clicked(winId: u32, pos: Render.IPoint) void {
 
 pub const WidgetFactory = struct {
 
-    pub fn create(mw: *MainWindow, nameId: []const u8) Widget {
+    pub fn create(mw: *MainWindow, nameId: []const u8) Error!Widget {
         _ = nameId;
         return Button.create(mw.r);
     }
@@ -253,14 +310,14 @@ pub const MainWindow = struct {
     w: Render.Window,
     r: Render.Renderer,
 
-    fn create(title: []const u8) *MainWindow {
+    fn create(title: []const u8) Error!*MainWindow {
         const w = Render.Window.create(title, Render.Size{ .x = 640, .y = 480, }, Render.Window.Flags{ .opengl = 1, })
-            catch unreachable;
-        var window = allocator.create(MainWindow) catch unreachable;
+            catch |e| return convert_sdl2_error(e);
+        var window = allocator.create(MainWindow) catch return Error.OutOfMemory;
         window.* = .{
             .c = .{},
             .w = w,
-            .r = Render.Renderer.create(w, .{ .accelerated = 1, }) catch unreachable,
+            .r = Render.Renderer.create(w, .{ .accelerated = 1, }) catch |e| return convert_sdl2_error(e),
         };
         return window;
     }
@@ -275,8 +332,8 @@ pub const MainWindow = struct {
         allocator.destroy(this);
     }
 
-    fn add_child(this: *MainWindow, wid: Widget) *Widget {
-        const elem = this.*.c.addOne(allocator) catch unreachable;
+    fn add_child(this: *MainWindow, wid: Widget) Error!*Widget {
+        const elem = this.*.c.addOne(allocator) catch return Error.OutOfMemory;
         elem.* = wid;
         return elem;
     }
@@ -297,15 +354,15 @@ pub const MainWindow = struct {
         }
     }
 
-    fn update(this: *MainWindow) void {
-        this.r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch unreachable;
+    fn update(this: *MainWindow) Error!void {
+        this.r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return convert_sdl2_error(e);
         const currArea = this.r.getViewport();
         for (this.c.items) |item| {
             const targArea = item.get_area();
-            this.r.setViewport(targArea) catch unreachable;
-            item.update(this.r) catch unreachable;
+            this.r.setViewport(targArea) catch |e| return convert_sdl2_error(e);
+            item.update(this.r) catch |e| return e;
         }
-        this.r.setViewport(currArea) catch unreachable;
+        this.r.setViewport(currArea) catch |e| return convert_sdl2_error(e);
         this.r.present();
     }
 };
@@ -314,7 +371,7 @@ pub const Widget = struct {
 
     pub const Virtual = struct {
         destroy:          fn (IPtr) void,
-        add_child:        fn (IPtr, Widget) *Widget,
+        add_child:        fn (IPtr, Widget) Error!*Widget,
         set_action:       fn (IPtr, []const u8, Fw.Action) bool,
         set_anchor:       fn (IPtr, Anchor) void,
         get_anchor:       fn (IPtr) Anchor,
@@ -326,7 +383,7 @@ pub const Widget = struct {
         get_property_str: fn (IPtr, []const u8) []const u8,
         get_property_int: fn (IPtr, []const u8) i64,
         get_property_flt: fn (IPtr, []const u8) f64,
-        update:           fn (IPtr, Render.Renderer) Render.Error!void,
+        update:           fn (IPtr, Render.Renderer) Error!void,
 
         handle_mouse_click: fn (IPtr, Render.IPoint) void,
         
@@ -419,8 +476,8 @@ pub const Widget = struct {
         anchor:   Anchor   = .{},
         size:     Render.Size = .{},
 
-        fn add_child(this: *Base, wid: Widget) *Widget {
-            const elem = this.*.children.addOne(allocator) catch unreachable;
+        fn add_child(this: *Base, wid: Widget) Error!*Widget {
+            const elem = this.*.children.addOne(allocator) catch return Error.OutOfMemory;
             elem.* = wid;
             return elem;
         }
@@ -438,7 +495,7 @@ pub const Widget = struct {
                 this.b.children.deinit(allocator);
                 return this.*.destroy();
             }
-            fn add_child(inst: IPtr, wid: Widget) *Widget {
+            fn add_child(inst: IPtr, wid: Widget) Error!*Widget {
                 var this = @ptrCast(*T, inst);
                 return this.*.b.add_child(wid);
             }
@@ -486,17 +543,17 @@ pub const Widget = struct {
                 const this = @ptrCast(*T, inst);
                 return this.get_property_flt(name);
             }
-            fn update(inst: IPtr, rend: Render.Renderer) Render.Error!void {
+            fn update(inst: IPtr, rend: Render.Renderer) Error!void {
                 var this = @ptrCast(*T, inst);
                 const currSize = this.b.size;
                 const currArea = rend.getViewport();
                 try this.update(rend);
                 for (this.b.children.items) |item| {
                     const targArea = item.get_anchor().get_destination_area(currSize);
-                    try rend.setViewport(targArea);
-                    item.update(rend) catch unreachable;
+                    rend.setViewport(targArea) catch |e| return convert_sdl2_error(e);
+                    try item.update(rend);
                 }
-                try rend.setViewport(currArea);
+                rend.setViewport(currArea) catch |e| return convert_sdl2_error(e);
             }
             fn handle_mouse_click(inst: IPtr, pos: Render.IPoint) void {
                 var this = @ptrCast(*T, inst);
@@ -508,7 +565,7 @@ pub const Widget = struct {
     fn destroy(wid: Widget) void {
         return wid.vptr.destroy(wid.inst);
     }
-    fn add_child(wid: Widget, child: Widget) *Widget {
+    fn add_child(wid: Widget, child: Widget) Error!*Widget {
         return wid.vptr.add_child(wid.inst, child);
     }
     fn set_action(wid: Widget, name: []const u8, action: Fw.Action) bool {
@@ -544,7 +601,7 @@ pub const Widget = struct {
     fn get_property_flt(wid: Widget, name: []const u8) f64 {
         return wid.vptr.get_property_flt(wid.inst, name);
     }
-    fn update(wid: Widget, rend: Render.Renderer) Render.Error!void {
+    fn update(wid: Widget, rend: Render.Renderer) Error!void {
         return wid.vptr.update(wid.inst, rend);
     }
     fn handle_mouse_click(wid: Widget, pos: Render.IPoint) void {
@@ -567,8 +624,8 @@ const Button = struct {
 
     const virtual = Widget.Virtual.generate(Button);
 
-    fn create(rend: Render.Renderer) Widget {
-        var button = allocator.create(Button) catch unreachable;
+    fn create(rend: Render.Renderer) Error!Widget {
+        var button = allocator.create(Button) catch return Error.OutOfMemory;
         const size = buttonTemplate.getAttributes().size;
         button.* = .{
             .b = .{
@@ -576,10 +633,10 @@ const Button = struct {
                 .size = size,
             },
             .actions = .{},
-            .texture = Render.Texture.create(rend, .rgba8888, .target, size) catch unreachable,
+            .texture = Render.Texture.create(rend, .rgba8888, .target, size) catch |e| return convert_sdl2_error(e),
         };
-        button.draw_button();
-        return .{ .vptr = &virtual, .inst = @ptrCast(IPtr, button), };
+        try button.draw_button();
+        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, button), };
     }
     
     fn destroy(this: *Button) void {
@@ -588,23 +645,26 @@ const Button = struct {
         allocator.destroy(this);
     }
     
-    fn draw_button(this: *Button) void {
+    fn draw_button(this: *Button) Error!void {
         {
-            this.*.b.renderer.setTarget(this.*.texture) catch unreachable;
+            this.*.b.renderer.setTarget(this.*.texture) catch |e| return convert_sdl2_error(e);
             defer this.*.b.renderer.freeTarget() catch unreachable;
-            this.*.b.renderer.copyFull(buttonTemplate) catch unreachable;
+            this.*.b.renderer.copyFull(buttonTemplate) catch |e| return convert_sdl2_error(e);
         }
         if (this.label.len != 0) {
-            const text = font.renderText(this.label, .{ .r = 255, .g = 255, .b = 255, .a = 255, }) catch unreachable;
+            const text = font.renderText(this.label, .{ .r = 255, .g = 255, .b = 255, .a = 255, })
+                catch |e| return convert_sdl2_error(e);
             defer text.destroy();
-            const texttex = Render.Texture.createSurface(this.*.b.renderer, text) catch unreachable;
+            const texttex = Render.Texture.createSurface(this.*.b.renderer, text)
+                catch |e| return convert_sdl2_error(e);
             defer texttex.destroy();
             {
                 const textsz = texttex.getAttributes().size;
                 const inscribed = this.b.size.toRect().inscribe(textsz.toRect());
-                this.*.b.renderer.setTarget(this.*.texture) catch unreachable;
+                this.*.b.renderer.setTarget(this.*.texture)
+                    catch |e| return convert_sdl2_error(e);
                 defer this.*.b.renderer.freeTarget() catch unreachable;
-                this.*.b.renderer.copyOriginal(texttex, inscribed) catch unreachable;
+                this.*.b.renderer.copyOriginal(texttex, inscribed) catch |e| return convert_sdl2_error(e);
             }
         }
     }
@@ -620,8 +680,14 @@ const Button = struct {
     fn set_property_str(this: *Button, name: []const u8, value: []const u8) callconv(.Inline) bool {
         if (std.mem.eql(u8, name, "label")) {
             if (this.label.len != 0) allocator.free(this.label);
-            this.label = allocator.dupeZ(u8, value) catch unreachable;
-            this.draw_button();
+            this.label = allocator.dupeZ(u8, value) catch |e| {
+                handle_error(e, @src(), "");
+                return false;
+            };
+            this.draw_button() catch |e| {
+                handle_error(e, @src(), "");
+                return false;
+            };
             return true;
         }
         return false;
@@ -660,8 +726,8 @@ const Button = struct {
         return 0.0;
     }
 
-    fn update(this: *Button, rend: Render.Renderer) callconv(.Inline) Render.Error!void {
-        rend.copyFull(this.texture) catch unreachable;
+    fn update(this: *Button, rend: Render.Renderer) callconv(.Inline) Error!void {
+        rend.copyFull(this.texture) catch |e| return convert_sdl2_error(e);
         _ = this;
     }
 

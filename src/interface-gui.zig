@@ -16,7 +16,7 @@ pub fn get_func_info(fnptr: *const Fw.FnPtr) callconv(.C) Fw.String {
 }
 
 pub const Virtual = extern struct {
-    create_window: fn(Fw.String) callconv(.C) WinPtr,
+    create_window: fn(Fw.String) callconv(.C) ?WinPtr,
     update_window: fn(WinPtr) callconv(.C) void,
     create_widget: fn(WinPtr, ?WidPtr, Fw.String) callconv(.C) ?WidPtr,
     set_widget_junction_point: fn(WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool,
