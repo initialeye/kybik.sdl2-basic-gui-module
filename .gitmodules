@@ -1,0 +1,6 @@
+[submodule "deps/kybik"]
+	path = deps/kybik
+	url = https://github.com/initialeye/kybik
+[submodule "deps/sdl2-zig-binding"]
+	path = deps/sdl2-zig-binding
+	url = https://github.com/initialeye/sdl2-zig-binding

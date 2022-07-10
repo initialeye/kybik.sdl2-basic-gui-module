@@ -3,19 +3,19 @@ const std = @import("std");
 const pkgs = struct {
     const kybik = std.build.Pkg{
         .name = "framework.zig",
-        .path = std.build.FileSource.relative("./deps/kybik-core/framework.zig"),
+        .path = std.build.FileSource.relative("./deps/kybik/framework.zig"),
     };
     const sdl2 = std.build.Pkg{
         .name = "sdl2.zig",
-        .path = std.build.FileSource.relative("./deps/sdl2/sdl2.zig"),
+        .path = std.build.FileSource.relative("./deps/sdl2-zig-binding/sdl2.zig"),
     };
     const sdl_image = std.build.Pkg{
         .name = "sdl-image.zig",
-        .path = std.build.FileSource.relative("./deps/sdl2/sdl-image.zig"),
+        .path = std.build.FileSource.relative("./deps/sdl2-zig-binding/sdl-image.zig"),
     };
     const sdl_ttf = std.build.Pkg{
         .name = "sdl-ttf.zig",
-        .path = std.build.FileSource.relative("./deps/sdl2/sdl-ttf.zig"),
+        .path = std.build.FileSource.relative("./deps/sdl2-zig-binding/sdl-ttf.zig"),
     };
 };
 
