@@ -75,6 +75,7 @@ export fn load() *const Fw.ModuleHeader {
 const Error = error {
     OutOfMemory,
     RenderFailed,
+    WidgetNotFound,
 };
 
 fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
@@ -299,9 +300,24 @@ pub fn mouse_clicked(winId: u32, pos: Render.IPoint) void {
 
 pub const WidgetFactory = struct {
 
+    const CreateFunc = fn(Render.Renderer) Error!Widget;
+    const CreateMapElement = struct {
+        key: []const u8,
+        value: CreateFunc,
+    };
+    const createMap = [_]CreateMapElement{
+        .{ .key = "button", .value = Button.create, },
+        .{ .key = "toolbox", .value = Toolbox.create, },
+    };
+
     pub fn create(mw: *MainWindow, nameId: []const u8) Error!Widget {
-        _ = nameId;
-        return Button.create(mw.r);
+        //TODO make binary search
+        for (createMap) |elem| {
+            if (std.mem.eql(u8, elem.key, nameId)) {
+                return elem.value(mw.r);
+            }
+        }
+        return Error.WidgetNotFound;
     }
 };
 
@@ -321,7 +337,7 @@ pub const MainWindow = struct {
         };
         return window;
     }
-    
+
     fn destroy(this: *MainWindow) void {
         for (this.c.items) |item| {
             item.destroy();
@@ -337,7 +353,7 @@ pub const MainWindow = struct {
         elem.* = wid;
         return elem;
     }
-    
+
     fn get_id(this: *MainWindow) u32 {
         return this.w.getId();
     }
@@ -386,7 +402,7 @@ pub const Widget = struct {
         update:           fn (IPtr, Render.Renderer) Error!void,
 
         handle_mouse_click: fn (IPtr, Render.IPoint) void,
-        
+
         pub fn generate(T: anytype) Virtual {
             return Virtual{
                 .destroy          = Widget.Funcs(T).destroy,
@@ -407,7 +423,7 @@ pub const Widget = struct {
             };
         }
     };
-    
+
     const Binding = struct {
         par: Render.IPoint = .{}, // Position inside parent widget
         cur: Render.IPoint = .{}, // Position insize current widget
@@ -467,7 +483,7 @@ pub const Widget = struct {
             }
         }
     };
-    
+
     const ChildVec = Vector(Widget);
 
     const Base = struct {
@@ -561,7 +577,7 @@ pub const Widget = struct {
             }
         };
     }
-    
+
     fn destroy(wid: Widget) void {
         return wid.vptr.destroy(wid.inst);
     }
@@ -612,6 +628,83 @@ pub const Widget = struct {
     inst: IPtr,
 };
 
+const Toolbox = struct {
+    b: Widget.Base,
+
+    const virtual = Widget.Virtual.generate(Toolbox);
+
+    fn create(rend: Render.Renderer) Error!Widget {
+        var toolbox = allocator.create(Toolbox) catch return Error.OutOfMemory;
+        toolbox.* = .{
+            .b = .{
+                .renderer = rend,
+                .size = .{ .x = 200, .y = 200, },
+            }
+        };
+        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, toolbox), };
+    }
+
+    fn destroy(this: *Toolbox) callconv(.Inline) void {
+        allocator.destroy(this);
+    }
+
+    fn set_action(this: *Toolbox, name: []const u8, action: Fw.Action) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = action;
+        return false;
+    }
+
+    fn set_property_str(this: *Toolbox, name: []const u8, value: []const u8) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+
+    fn set_property_int(this: *Toolbox, name: []const u8, value: i64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+
+    fn set_property_flt(this: *Toolbox, name: []const u8, value: f64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+
+    fn get_property_str(this: *const Toolbox, name: []const u8) callconv(.Inline) []const u8 {
+        _ = this;
+        _ = name;
+        return "";
+    }
+
+    fn get_property_int(this: *const Toolbox, name: []const u8) callconv(.Inline) i64 {
+        _ = this;
+        _ = name;
+        return 0;
+    }
+
+    fn get_property_flt(this: *const Toolbox, name: []const u8) callconv(.Inline) f64 {
+        _ = this;
+        _ = name;
+        return 0.0;
+    }
+
+    fn update(this: *Toolbox, rend: Render.Renderer) callconv(.Inline) Error!void {
+        _ = this;
+        _ = rend;
+    }
+
+    fn handle_mouse_click(this: *Toolbox, pos: Render.IPoint) callconv(.Inline) void {
+        _ = this;
+        _ = pos;
+    }
+};
+
 const Button = struct {
     b: Widget.Base,
     label: [:0]const u8 = "",
@@ -638,13 +731,13 @@ const Button = struct {
         try button.draw_button();
         return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, button), };
     }
-    
-    fn destroy(this: *Button) void {
+
+    fn destroy(this: *Button) callconv(.Inline) void {
         if (this.label.len != 0) allocator.free(this.label);
         this.texture.destroy();
         allocator.destroy(this);
     }
-    
+
     fn draw_button(this: *Button) Error!void {
         {
             this.*.b.renderer.setTarget(this.*.texture) catch |e| return convert_sdl2_error(e);
@@ -731,7 +824,7 @@ const Button = struct {
         _ = this;
     }
 
-    fn handle_mouse_click(this: *Button, pos: Render.IPoint) void {
+    fn handle_mouse_click(this: *Button, pos: Render.IPoint) callconv(.Inline) void {
         _ = this;
         _ = pos;
     }
