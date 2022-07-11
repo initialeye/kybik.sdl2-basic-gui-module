@@ -222,8 +222,8 @@ fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32,
     var w = @ptrCast(*Widget, widget);
     var anchor = w.get_anchor();
     anchor.b[idx] = Widget.Binding{
-        .par = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
-        .cur = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
+        .p = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
+        .c = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
     };
     w.set_anchor(anchor);
     return true;
@@ -362,9 +362,10 @@ pub const MainWindow = struct {
         _ = this;
         _ = pos;
         for (this.c.items) |item| {
-            const area = item.get_area();
-            if (pos.inside(area)) {
-                item.handle_mouse_click(pos);
+            const currArea = this.r.getViewport();
+            const areas = item.get_areas(currArea);
+            if (pos.inside(areas.dst)) {
+                item.handle_mouse_click(pos, areas.dst);
                 break;
             }
         }
@@ -374,9 +375,9 @@ pub const MainWindow = struct {
         this.r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return convert_sdl2_error(e);
         const currArea = this.r.getViewport();
         for (this.c.items) |item| {
-            const targArea = item.get_area();
-            this.r.setViewport(targArea) catch |e| return convert_sdl2_error(e);
-            item.update(this.r) catch |e| return e;
+            const targAreas = item.get_areas(currArea);
+            this.r.setViewport(targAreas.dst) catch |e| return convert_sdl2_error(e);
+            item.update(this.r, targAreas) catch |e| return e;
         }
         this.r.setViewport(currArea) catch |e| return convert_sdl2_error(e);
         this.r.present();
@@ -392,16 +393,16 @@ pub const Widget = struct {
         set_anchor:       fn (IPtr, Anchor) void,
         get_anchor:       fn (IPtr) Anchor,
         get_size:         fn (IPtr) Render.Size,
-        get_area:         fn (IPtr) Render.IRect,
+        get_areas:        fn (IPtr, Render.IRect) SrcDstArea,
         set_property_str: fn (IPtr, []const u8, []const u8) bool,
         set_property_int: fn (IPtr, []const u8, i64) bool,
         set_property_flt: fn (IPtr, []const u8, f64) bool,
         get_property_str: fn (IPtr, []const u8) []const u8,
         get_property_int: fn (IPtr, []const u8) i64,
         get_property_flt: fn (IPtr, []const u8) f64,
-        update:           fn (IPtr, Render.Renderer) Error!void,
+        update:           fn (IPtr, Render.Renderer, SrcDstArea) Error!void,
 
-        handle_mouse_click: fn (IPtr, Render.IPoint) void,
+        handle_mouse_click: fn (IPtr, Render.IPoint, Render.IRect) void,
 
         pub fn generate(T: anytype) Virtual {
             return Virtual{
@@ -411,7 +412,7 @@ pub const Widget = struct {
                 .set_anchor       = Widget.Funcs(T).set_anchor,
                 .get_anchor       = Widget.Funcs(T).get_anchor,
                 .get_size         = Widget.Funcs(T).get_size,
-                .get_area         = Widget.Funcs(T).get_area,
+                .get_areas        = Widget.Funcs(T).get_areas,
                 .set_property_str = Widget.Funcs(T).set_property_str,
                 .set_property_int = Widget.Funcs(T).set_property_int,
                 .set_property_flt = Widget.Funcs(T).set_property_flt,
@@ -425,62 +426,50 @@ pub const Widget = struct {
     };
 
     const Binding = struct {
-        par: Render.IPoint = .{}, // Position inside parent widget
-        cur: Render.IPoint = .{}, // Position insize current widget
+        p: Render.IPoint = .{}, // Position inside parent widget
+        c: Render.IPoint = .{}, // Position insize current widget
+    };
+
+    const SrcDstArea = struct {
+        src: Render.IRect,
+        dst: Render.IRect,
     };
 
     const Anchor = struct {
         b: [2]Binding = .{ .{}, .{}},
 
-        fn isSingle(a: Anchor) bool {
-            return a.b[0].cur.eql(a.b[1].cur);
+        fn isXStretched(a: Anchor) bool {
+            return a.b[0].c.x != a.b[1].c.x;
         }
 
-        fn isOnlyX(a: Anchor) bool {
-            return a.b[0].cur.y == a.b[1].cur.y and a.b[0].cur.x != a.b[1].cur.x;
+        fn isYStretched(a: Anchor) bool {
+            return a.b[0].c.y != a.b[1].c.y;
         }
 
-        fn isOnlyY(a: Anchor) bool {
-            return a.b[0].cur.x == a.b[1].cur.x and a.b[0].cur.y != a.b[1].cur.y;
-        }
-
-        fn get_destination_area(a: Anchor, src: Render.Size) Render.IRect {
-            _ = src;
-            if (a.isSingle()) {
-                return .{
-                    .x = a.b[0].par.x - a.b[0].cur.x,
-                    .y = a.b[0].par.y - a.b[0].cur.y,
-                    .w = src.x,
-                    .h = src.y,
-                };
-            } else
-            if (a.isOnlyX()) {
-                const stretch:f32 = @intToFloat(f32, a.b[0].par.x - a.b[1].par.x)/@intToFloat(f32, a.b[0].cur.x - a.b[1].cur.x);
-                return .{
-                    .x = a.b[0].par.x - @floatToInt(i16, @intToFloat(f32, a.b[0].cur.x)*stretch),
-                    .y = a.b[0].par.y - a.b[0].cur.y,
-                    .w = @floatToInt(i16, @intToFloat(f32, src.x)*stretch),
-                    .h = src.y,
-                };
-            } else
-            if (a.isOnlyY()) {
-                const stretch:f32 = @intToFloat(f32, a.b[0].par.y - a.b[1].par.y)/@intToFloat(f32, a.b[0].cur.y - a.b[1].cur.y);
-                return .{
-                    .x = a.b[0].par.x - a.b[0].cur.x,
-                    .y = a.b[0].par.y - @floatToInt(i16, @intToFloat(f32, a.b[0].cur.y)*stretch),
-                    .w = src.x,
-                    .h = @floatToInt(i16, @intToFloat(f32, src.y)*stretch),
-                };
-            } else {
-                const stX:f32 = @intToFloat(f32, a.b[0].par.x - a.b[1].par.x)/@intToFloat(f32, a.b[0].cur.x - a.b[1].cur.x);
-                const stY:f32 = @intToFloat(f32, a.b[0].par.y - a.b[1].par.y)/@intToFloat(f32, a.b[0].cur.y - a.b[1].cur.y);
-                return .{
-                    .x = a.b[0].par.x - @floatToInt(i16, @intToFloat(f32, a.b[0].cur.x)*stX),
-                    .y = a.b[0].par.y - @floatToInt(i16, @intToFloat(f32, a.b[0].cur.y)*stY),
-                    .w = @floatToInt(i16, @intToFloat(f32, src.x)*stX),
-                    .h = @floatToInt(i16, @intToFloat(f32, src.y)*stY),
-                };
-            }
+        fn get_sd_area(a: Anchor, srcWgt: Render.IRect, dstWgt: Render.IRect) SrcDstArea {
+            var stX: f32 = 1.0;
+            var stY: f32 = 1.0;
+            if (a.isXStretched()) stX = @intToFloat(f32, a.b[0].p.x - a.b[1].p.x)/@intToFloat(f32, a.b[0].c.x - a.b[1].c.x);
+            if (a.isYStretched()) stY = @intToFloat(f32, a.b[0].p.y - a.b[1].p.y)/@intToFloat(f32, a.b[0].c.y - a.b[1].c.y);
+            const initialX = @intToFloat(f32, dstWgt.x) + @intToFloat(f32, a.b[0].p.x) - @intToFloat(f32, a.b[0].c.x)*stX;
+            const initialY = @intToFloat(f32, dstWgt.y) + @intToFloat(f32, a.b[0].p.y) - @intToFloat(f32, a.b[0].c.y)*stY;
+            const targArea = Render.IRect{
+                .x = @floatToInt(i16, initialX),
+                .y = @floatToInt(i16, initialY),
+                .w = @floatToInt(i16, @intToFloat(f32, srcWgt.w)*stX),
+                .h = @floatToInt(i16, @intToFloat(f32, srcWgt.h)*stY),
+            };
+            const dst = dstWgt.overlay(targArea);
+            const src = .{
+                .x = srcWgt.x,
+                .y = srcWgt.y,
+                .w = @floatToInt(i16, @intToFloat(f32, dst.w)/stX),
+                .h = @floatToInt(i16, @intToFloat(f32, dst.h)/stY),
+            };
+            return .{
+                .dst = dst,
+                .src = src,
+            };
         }
     };
 
@@ -531,9 +520,9 @@ pub const Widget = struct {
                 const this = @ptrCast(*T, inst);
                 return this.b.size;
             }
-            fn get_area(inst: IPtr) Render.IRect {
+            fn get_areas(inst: IPtr, parArea: Render.IRect) SrcDstArea {
                 const this = @ptrCast(*T, inst);
-                return this.b.anchor.get_destination_area(this.b.size);
+                return this.b.anchor.get_sd_area(this.b.size.toRect(), parArea);
             }
             fn set_property_str(inst: IPtr, name: []const u8, value: []const u8) bool {
                 var this = @ptrCast(*T, inst);
@@ -559,20 +548,26 @@ pub const Widget = struct {
                 const this = @ptrCast(*T, inst);
                 return this.get_property_flt(name);
             }
-            fn update(inst: IPtr, rend: Render.Renderer) Error!void {
+            fn update(inst: IPtr, rend: Render.Renderer, areas: SrcDstArea) Error!void {
                 var this = @ptrCast(*T, inst);
-                const currSize = this.b.size;
                 const currArea = rend.getViewport();
-                try this.update(rend);
+                try this.update(rend, areas);
                 for (this.b.children.items) |item| {
-                    const targArea = item.get_anchor().get_destination_area(currSize);
-                    rend.setViewport(targArea) catch |e| return convert_sdl2_error(e);
-                    try item.update(rend);
+                    const targAreas = item.get_areas(currArea);
+                    rend.setViewport(targAreas.dst) catch |e| return convert_sdl2_error(e);
+                    try item.update(rend, targAreas);
                 }
                 rend.setViewport(currArea) catch |e| return convert_sdl2_error(e);
             }
-            fn handle_mouse_click(inst: IPtr, pos: Render.IPoint) void {
+            fn handle_mouse_click(inst: IPtr, pos: Render.IPoint, parentArea: Render.IRect) void {
                 var this = @ptrCast(*T, inst);
+                for (this.b.children.items) |item| {
+                    const areas = item.get_areas(parentArea);
+                    if (pos.inside(areas.dst)) {
+                        item.handle_mouse_click(pos, areas.dst);
+                        break;
+                    }
+                }
                 this.handle_mouse_click(pos);
             }
         };
@@ -596,8 +591,8 @@ pub const Widget = struct {
     fn get_size(wid: Widget) Render.Size {
         return wid.vptr.get_size(wid.inst);
     }
-    fn get_area(wid: Widget) Render.IRect {
-        return wid.vptr.get_area(wid.inst);
+    fn get_areas(wid: Widget, parArea: Render.IRect) SrcDstArea {
+        return wid.vptr.get_areas(wid.inst, parArea);
     }
     fn set_property_str(wid: Widget, name: []const u8, value: []const u8) bool {
         return wid.vptr.set_property_str(wid.inst, name, value);
@@ -617,11 +612,11 @@ pub const Widget = struct {
     fn get_property_flt(wid: Widget, name: []const u8) f64 {
         return wid.vptr.get_property_flt(wid.inst, name);
     }
-    fn update(wid: Widget, rend: Render.Renderer) Error!void {
-        return wid.vptr.update(wid.inst, rend);
+    fn update(wid: Widget, rend: Render.Renderer, areas: Widget.SrcDstArea) Error!void {
+        return wid.vptr.update(wid.inst, rend, areas);
     }
-    fn handle_mouse_click(wid: Widget, pos: Render.IPoint) void {
-        return wid.vptr.handle_mouse_click(wid.inst, pos);
+    fn handle_mouse_click(wid: Widget, pos: Render.IPoint, parentArea: Render.IRect) void {
+        return wid.vptr.handle_mouse_click(wid.inst, pos, parentArea);
     }
 
     vptr: VPtr,
@@ -694,9 +689,10 @@ const Toolbox = struct {
         return 0.0;
     }
 
-    fn update(this: *Toolbox, rend: Render.Renderer) callconv(.Inline) Error!void {
+    fn update(this: *Toolbox, rend: Render.Renderer, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
         _ = this;
         _ = rend;
+        _ = areas;
     }
 
     fn handle_mouse_click(this: *Toolbox, pos: Render.IPoint) callconv(.Inline) void {
@@ -753,7 +749,7 @@ const Button = struct {
             defer texttex.destroy();
             {
                 const textsz = texttex.getAttributes().size;
-                const inscribed = this.b.size.toRect().inscribe(textsz.toRect());
+                const inscribed = textsz.toRect().inscribe(this.b.size.toRect().center());
                 this.*.b.renderer.setTarget(this.*.texture)
                     catch |e| return convert_sdl2_error(e);
                 defer this.*.b.renderer.freeTarget() catch unreachable;
@@ -819,8 +815,8 @@ const Button = struct {
         return 0.0;
     }
 
-    fn update(this: *Button, rend: Render.Renderer) callconv(.Inline) Error!void {
-        rend.copyFull(this.texture) catch |e| return convert_sdl2_error(e);
+    fn update(this: *Button, rend: Render.Renderer, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
+        rend.copyPartial(this.texture, areas.src) catch |e| return convert_sdl2_error(e);
         _ = this;
     }
 
