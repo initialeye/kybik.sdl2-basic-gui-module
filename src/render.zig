@@ -27,6 +27,35 @@ pub fn quit() void {
     sdl2.quit();
 }
 
+pub const TextureStorage = struct {
+    data: std.StringArrayHashMapUnmanaged(Texture) = .{},
+
+    pub fn destroy(this: *@This()) void {
+        var iter = this.data.iterator();
+        while(iter.next()) |entry| {
+            gui.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.destroy();
+        }
+        this.data.deinit(gui.allocator);
+    }
+    pub fn load(this: *@This(), rend: Renderer, file: []const u8) gui.Error!Texture {
+        var paths = [_][]const u8 { gui.resources, "./texture/", file, };
+        const fullpath = std.fs.path.joinZ(gui.allocator, paths[0..]) catch return gui.Error.OutOfMemory;
+        defer gui.allocator.free(fullpath);
+        
+        const tex = image.loadTexture(rend, fullpath) catch return gui.Error.TextureLoadFailed;
+        errdefer tex.destroy();
+        const fileDup = gui.allocator.dupe(u8, file) catch return gui.Error.OutOfMemory;
+        var v = this.data.getOrPut(gui.allocator, fileDup) catch return gui.Error.OutOfMemory;
+        v.value_ptr.* = tex;
+        return v.value_ptr.*;
+    }
+    pub fn get(this: *@This(), file: []const u8) ?Texture {
+        const e = this.data.getEntry(file) orelse return null;
+        return e.value_ptr.*;
+    }
+};
+
 pub fn drawButtonTemplate(size: sdl2.Size) sdl2.Error!sdl2.Surface {
     var surface = try sdl2.Surface.create(sdl2.Surface.Format.rgba8888, size);
     var ctx = try sdl2.Renderer.createDrawContext(surface);

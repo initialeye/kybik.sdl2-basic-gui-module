@@ -2,12 +2,19 @@ const Fw = @import("framework.zig");
 
 pub const WinPtr = *align(@alignOf(*void)) opaque{};
 pub const WidPtr = *align(@alignOf(*void)) opaque{};
+pub const Texture = *opaque{};
 
 pub const API_VERSION:usize = 0;
 pub const INTERFACE_VERSION = Fw.CompatVersion.init(0, 0);
+
 pub const ATTRIBUTES = Fw.Attributes {
     .multiple_versions = 0,
     .multiple_modules  = 0,
+};
+
+pub const TextureSize = extern struct {
+    x: u32,
+    y: u32,
 };
 
 pub fn get_func_info(fnptr: *const Fw.FnPtr) callconv(.C) Fw.String {
@@ -27,5 +34,8 @@ pub const Virtual = extern struct {
     get_widget_property_str: fn(WidPtr, Fw.String) callconv(.C) Fw.String,
     get_widget_property_int: fn(WidPtr, Fw.String) callconv(.C) i64,
     get_widget_property_flt: fn(WidPtr, Fw.String) callconv(.C) f64,
+    load_texture: fn(Fw.String) callconv(.C) ?Texture,
+    get_texture: fn(Fw.String) callconv(.C) ?Texture,
+    get_texture_size: fn(Texture) callconv(.C) TextureSize, 
 };
 

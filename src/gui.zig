@@ -1,8 +1,9 @@
 const std = @import("std");
 const Fw = @import("framework.zig");
 const Gui = @import("interface-gui.zig");
-const Render = @import("render.zig");
-const Events = @import("events.zig");
+
+pub const Render = @import("render.zig");
+pub const Events = @import("events.zig");
 
 const Vector = std.ArrayListUnmanaged;
 const Instance = opaque{};
@@ -13,6 +14,7 @@ pub var module: Fw.Module = undefined;
 pub var allocator: std.mem.Allocator = undefined;
 pub var windows: Vector(*MainWindow) = .{};
 pub var resources: []const u8 = undefined;
+pub var textures: Render.TextureStorage = .{};
 pub var font: Render.Font = undefined;
 
 pub var textureInitialized = false;
@@ -62,6 +64,9 @@ const vptr = Gui.Virtual {
     .get_widget_property_str = Export.get_widget_property_str,
     .get_widget_property_int = Export.get_widget_property_int,
     .get_widget_property_flt = Export.get_widget_property_flt,
+    .load_texture = Export.load_texture,
+    .get_texture = Export.get_texture,
+    .get_texture_size = Export.get_texture_size,
 };
 
 export fn API_version() usize {
@@ -72,10 +77,12 @@ export fn load() *const Fw.ModuleHeader {
     return &HEADER;
 }
 
-const Error = error {
+pub const Error = error {
     OutOfMemory,
     RenderFailed,
     WidgetNotFound,
+    NoRenderingContext,
+    TextureLoadFailed,
 };
 
 fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
@@ -137,6 +144,7 @@ fn run() callconv(.C) void {
 fn quit() callconv(.C) void {
     mtx.lock();
     defer mtx.unlock();
+    textures.destroy();
     for (windows.items) |w| {
         w.destroy();
     }
@@ -257,6 +265,26 @@ const Export = struct {
     fn get_widget_property_flt(widget: Gui.WidPtr, name: Fw.String) callconv(.C) f64 {
         var w = @ptrCast(*Widget, widget);
         return w.get_property_flt(name.from());
+    }
+    fn load_texture(path: Fw.String) callconv(.C) ?Gui.Texture {
+        if (windows.items.len == 0) {
+            handle_error(Error.NoRenderingContext, @src(), "");
+            return null;
+        }
+        const t = textures.load(windows.items[0].r, path.from()) catch |e| {
+            handle_error(e, @src(), "");
+            return null;
+        };
+        return @intToPtr(Gui.Texture, @bitCast(usize, t));
+    }
+    fn get_texture(path: Fw.String) callconv(.C) ?Gui.Texture {
+        const t = textures.get(path.from()) orelse return null;
+        return @intToPtr(Gui.Texture, @bitCast(usize, t));
+    }
+    fn get_texture_size(tex: Gui.Texture) callconv(.C) Gui.TextureSize {
+        const t = @bitCast(Render.Texture, @ptrToInt(tex));
+        const size = t.getAttributes().size;
+        return .{ .x = @intCast(u32, size.x), .y = @intCast(u32, size.y) };
     }
 };
 
@@ -685,6 +713,7 @@ const Toolbox = struct {
         _ = this;
         _ = rend;
         _ = areas;
+        rend.copyFull(buttonTemplate) catch |e| return convert_sdl2_error(e);
     }
 
     fn handle_mouse_click(this: *Toolbox, pos: Render.IPoint) callconv(.Inline) void {
