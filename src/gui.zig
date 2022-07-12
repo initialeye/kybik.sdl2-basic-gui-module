@@ -51,17 +51,17 @@ const HEADER = Fw.ModuleHeader {
 const dependencies = [0]Fw.Dependency {};
 
 const vptr = Gui.Virtual {
-    .create_window = create_window,
-    .update_window = update_window,
-    .create_widget = create_widget,
-    .set_widget_junction_point = set_widget_junction_point,
-    .reset_widget_junction_point = reset_widget_junction_point,
-    .set_widget_property_str = set_widget_property_str,
-    .set_widget_property_int = set_widget_property_int,
-    .set_widget_property_flt = set_widget_property_flt,
-    .get_widget_property_str = get_widget_property_str,
-    .get_widget_property_int = get_widget_property_int,
-    .get_widget_property_flt = get_widget_property_flt,
+    .create_window = Export.create_window,
+    .update_window = Export.update_window,
+    .create_widget = Export.create_widget,
+    .set_widget_junction_point = Export.set_widget_junction_point,
+    .reset_widget_junction_point = Export.reset_widget_junction_point,
+    .set_widget_property_str = Export.set_widget_property_str,
+    .set_widget_property_int = Export.set_widget_property_int,
+    .set_widget_property_flt = Export.set_widget_property_flt,
+    .get_widget_property_str = Export.get_widget_property_str,
+    .get_widget_property_int = Export.get_widget_property_int,
+    .get_widget_property_flt = Export.get_widget_property_flt,
 };
 
 export fn API_version() usize {
@@ -160,113 +160,105 @@ fn handle(inf: *const Fw.Interface, evid: u64) callconv(.C) void {
     _ = evid;
 }
 
-fn create_window(title: Fw.String) callconv(.C) ?Gui.WinPtr {
-    var res = MainWindow.create(title.from()) catch |e| {
-        handle_error(e, @src(), "");
-        return null;
-    };
-    windows.append(allocator, res) catch handle_error(Error.OutOfMemory, @src(), "");
-    if (textureInitialized == false) {
-        const size = Render.Size{ .x = 128, .y = 64, };
-        const surf = Render.drawButtonTemplate(size) catch |e| {
-            handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
-            return @ptrCast(Gui.WinPtr, res);
+const Export = struct {
+    fn create_window(title: Fw.String) callconv(.C) ?Gui.WinPtr {
+        var res = MainWindow.create(title.from()) catch |e| {
+            handle_error(e, @src(), "");
+            return null;
         };
-        defer surf.destroy();
-        buttonTemplate = Render.Texture.createSurface(res.r, surf) catch |e| {
-            handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
-            return @ptrCast(Gui.WinPtr, res);
-        };
-        textureInitialized = true;
+        windows.append(allocator, res) catch handle_error(Error.OutOfMemory, @src(), "");
+        if (textureInitialized == false) {
+            const size = Render.Size{ .x = 128, .y = 64, };
+            const surf = Render.drawButtonTemplate(size) catch |e| {
+                handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
+                return @ptrCast(Gui.WinPtr, res);
+            };
+            defer surf.destroy();
+            buttonTemplate = Render.Texture.createSurface(res.r, surf) catch |e| {
+                handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
+                return @ptrCast(Gui.WinPtr, res);
+            };
+            textureInitialized = true;
+        }
+        return @ptrCast(Gui.WinPtr, res);
     }
-    return @ptrCast(Gui.WinPtr, res);
-}
-
-fn update_window(window: Gui.WinPtr) callconv(.C) void {
-    var w = @ptrCast(*MainWindow, window);
-    w.update() catch |e| {
-        handle_error(e, @src(), "");
-    };
-}
-
-fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.String) callconv(.C) ?Gui.WidPtr {
-    var win = @ptrCast(*MainWindow, winPtr);
-    if (parentWidget != null) {
-        const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
+    fn update_window(window: Gui.WinPtr) callconv(.C) void {
+        var w = @ptrCast(*MainWindow, window);
+        w.update() catch |e| {
             handle_error(e, @src(), "");
-            return null;
         };
-        const pwgt = @ptrCast(*Widget, parentWidget);
-        const res = pwgt.add_child(cwgt) catch |e| {
-            cwgt.destroy();
-            handle_error(e, @src(), "");
-            return null;
-        };
-        return @ptrCast(Gui.WidPtr, res);
-    } else {
-        const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
-            handle_error(e, @src(), "");
-            return null;
-        };
-        const res = win.add_child(cwgt) catch |e| {
-            cwgt.destroy();
-            handle_error(e, @src(), "");
-            return null;
-        };
-        return @ptrCast(Gui.WidPtr, res);
     }
-}
-
-fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
-    if(idx > 1) return false;
-    var w = @ptrCast(*Widget, widget);
-    var anchor = w.get_anchor();
-    anchor.b[idx] = Widget.Binding{
-        .p = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
-        .c = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
-    };
-    w.set_anchor(anchor);
-    return true;
-}
-
-fn reset_widget_junction_point(widget: Gui.WidPtr, idx: u8) callconv(.C) bool {
-    if(idx > 1) return false;
-    var w = @ptrCast(*Widget, widget);
-    const bind = w.get_anchor().b[@intCast(u1, idx) +% 1];
-    const anchor = Widget.Anchor{ .b = .{ bind, bind } };
-    w.set_anchor(anchor);
-    return true;
-}
-
-fn set_widget_property_str(widget: Gui.WidPtr, name: Fw.String, value: Fw.String) callconv(.C) bool {
-    var w = @ptrCast(*Widget, widget);
-    return w.set_property_str(name.from(), value.from());
-}
-
-fn set_widget_property_int(widget: Gui.WidPtr, name: Fw.String, value: i64) callconv(.C) bool {
-    var w = @ptrCast(*Widget, widget);
-    return w.set_property_int(name.from(), value);
-}
-
-fn set_widget_property_flt(widget: Gui.WidPtr, name: Fw.String, value: f64) callconv(.C) bool {
-    var w = @ptrCast(*Widget, widget);
-    return w.set_property_flt(name.from(), value);
-}
-
-fn get_widget_property_str(widget: Gui.WidPtr, name: Fw.String) callconv(.C) Fw.String {
-    var w = @ptrCast(*Widget, widget);
-    return Fw.String.init(w.get_property_str(name.from()));
-}
-
-fn get_widget_property_int(widget: Gui.WidPtr, name: Fw.String) callconv(.C) i64 {
-    var w = @ptrCast(*Widget, widget);
-    return w.get_property_int(name.from());
-}
-
-fn get_widget_property_flt(widget: Gui.WidPtr, name: Fw.String) callconv(.C) f64 {
-    var w = @ptrCast(*Widget, widget);
-    return w.get_property_flt(name.from());
-}
+    fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.String) callconv(.C) ?Gui.WidPtr {
+        var win = @ptrCast(*MainWindow, winPtr);
+        if (parentWidget != null) {
+            const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
+                handle_error(e, @src(), "");
+                return null;
+            };
+            const pwgt = @ptrCast(*Widget, parentWidget);
+            const res = pwgt.add_child(cwgt) catch |e| {
+                cwgt.destroy();
+                handle_error(e, @src(), "");
+                return null;
+            };
+            return @ptrCast(Gui.WidPtr, res);
+        } else {
+            const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
+                handle_error(e, @src(), "");
+                return null;
+            };
+            const res = win.add_child(cwgt) catch |e| {
+                cwgt.destroy();
+                handle_error(e, @src(), "");
+                return null;
+            };
+            return @ptrCast(Gui.WidPtr, res);
+        }
+    }
+    fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
+        if(idx > 1) return false;
+        var w = @ptrCast(*Widget, widget);
+        var anchor = w.get_anchor();
+        anchor.b[idx] = Widget.Binding{
+            .p = Render.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
+            .c = Render.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
+        };
+        w.set_anchor(anchor);
+        return true;
+    }
+    fn reset_widget_junction_point(widget: Gui.WidPtr, idx: u8) callconv(.C) bool {
+        if(idx > 1) return false;
+        var w = @ptrCast(*Widget, widget);
+        const bind = w.get_anchor().b[@intCast(u1, idx) +% 1];
+        const anchor = Widget.Anchor{ .b = .{ bind, bind } };
+        w.set_anchor(anchor);
+        return true;
+    }
+    fn set_widget_property_str(widget: Gui.WidPtr, name: Fw.String, value: Fw.String) callconv(.C) bool {
+        var w = @ptrCast(*Widget, widget);
+        return w.set_property_str(name.from(), value.from());
+    }
+    fn set_widget_property_int(widget: Gui.WidPtr, name: Fw.String, value: i64) callconv(.C) bool {
+        var w = @ptrCast(*Widget, widget);
+        return w.set_property_int(name.from(), value);
+    }
+    fn set_widget_property_flt(widget: Gui.WidPtr, name: Fw.String, value: f64) callconv(.C) bool {
+        var w = @ptrCast(*Widget, widget);
+        return w.set_property_flt(name.from(), value);
+    }
+    fn get_widget_property_str(widget: Gui.WidPtr, name: Fw.String) callconv(.C) Fw.String {
+        var w = @ptrCast(*Widget, widget);
+        return Fw.String.init(w.get_property_str(name.from()));
+    }
+    fn get_widget_property_int(widget: Gui.WidPtr, name: Fw.String) callconv(.C) i64 {
+        var w = @ptrCast(*Widget, widget);
+        return w.get_property_int(name.from());
+    }
+    fn get_widget_property_flt(widget: Gui.WidPtr, name: Fw.String) callconv(.C) f64 {
+        var w = @ptrCast(*Widget, widget);
+        return w.get_property_flt(name.from());
+    }
+};
 
 fn handle_events_task(ctx: Fw.CbCtx) callconv(.C) void {
     mtx.lock();
