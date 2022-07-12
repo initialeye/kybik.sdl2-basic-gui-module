@@ -23,9 +23,10 @@ pub fn get_func_info(fnptr: *const Fw.FnPtr) callconv(.C) Fw.String {
 }
 
 pub const Virtual = extern struct {
-    create_window: fn(Fw.String) callconv(.C) ?WinPtr,
+    create_window: fn(Fw.String, u16, u16) callconv(.C) ?WinPtr,
     update_window: fn(WinPtr) callconv(.C) void,
-    create_widget: fn(WinPtr, ?WidPtr, Fw.String) callconv(.C) ?WidPtr,
+    window_widget: fn(WinPtr) callconv(.C) WidPtr,
+    create_widget: fn(WidPtr, Fw.String) callconv(.C) ?WidPtr,
     set_widget_junction_point: fn(WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool,
     reset_widget_junction_point: fn(WidPtr, u8) callconv(.C) bool,
     set_widget_property_str: fn(WidPtr, Fw.String, Fw.String) callconv(.C) bool,
@@ -36,6 +37,6 @@ pub const Virtual = extern struct {
     get_widget_property_flt: fn(WidPtr, Fw.String) callconv(.C) f64,
     load_texture: fn(Fw.String) callconv(.C) ?Texture,
     get_texture: fn(Fw.String) callconv(.C) ?Texture,
-    get_texture_size: fn(Texture) callconv(.C) TextureSize, 
+    get_texture_size: fn(Texture) callconv(.C) TextureSize,
 };
 

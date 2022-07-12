@@ -1,6 +1,7 @@
 const std = @import("std");
 const Fw = @import("framework.zig");
 const Gui = @import("interface-gui.zig");
+const W = @import("widget.zig");
 
 pub const Render = @import("render.zig");
 pub const Events = @import("events.zig");
@@ -55,6 +56,7 @@ const dependencies = [0]Fw.Dependency {};
 const vptr = Gui.Virtual {
     .create_window = Export.create_window,
     .update_window = Export.update_window,
+    .window_widget = Export.window_widget,
     .create_widget = Export.create_widget,
     .set_widget_junction_point = Export.set_widget_junction_point,
     .reset_widget_junction_point = Export.reset_widget_junction_point,
@@ -169,8 +171,8 @@ fn handle(inf: *const Fw.Interface, evid: u64) callconv(.C) void {
 }
 
 const Export = struct {
-    fn create_window(title: Fw.String) callconv(.C) ?Gui.WinPtr {
-        var res = MainWindow.create(title.from()) catch |e| {
+    fn create_window(title: Fw.String, x: u16, y: u16) callconv(.C) ?Gui.WinPtr {
+        var res = MainWindow.create(title.from(), .{ .x = @intCast(i16, x), .y = @intCast(i16, y), }) catch |e| {
             handle_error(e, @src(), "");
             return null;
         };
@@ -182,7 +184,7 @@ const Export = struct {
                 return @ptrCast(Gui.WinPtr, res);
             };
             defer surf.destroy();
-            buttonTemplate = Render.Texture.createSurface(res.r, surf) catch |e| {
+            buttonTemplate = Render.Texture.createSurface(res.b.renderer, surf) catch |e| {
                 handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
                 return @ptrCast(Gui.WinPtr, res);
             };
@@ -192,36 +194,26 @@ const Export = struct {
     }
     fn update_window(window: Gui.WinPtr) callconv(.C) void {
         var w = @ptrCast(*MainWindow, window);
-        w.update() catch |e| {
+        w.run_update_all() catch |e| {
             handle_error(e, @src(), "");
         };
     }
-    fn create_widget(winPtr: Gui.WinPtr, parentWidget: ?Gui.WidPtr, nameId: Fw.String) callconv(.C) ?Gui.WidPtr {
+    fn window_widget(winPtr: Gui.WinPtr) callconv(.C) Gui.WidPtr {
         var win = @ptrCast(*MainWindow, winPtr);
-        if (parentWidget != null) {
-            const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
-                handle_error(e, @src(), "");
-                return null;
-            };
-            const pwgt = @ptrCast(*Widget, parentWidget);
-            const res = pwgt.add_child(cwgt) catch |e| {
-                cwgt.destroy();
-                handle_error(e, @src(), "");
-                return null;
-            };
-            return @ptrCast(Gui.WidPtr, res);
-        } else {
-            const cwgt = WidgetFactory.create(win, nameId.from()) catch |e| {
-                handle_error(e, @src(), "");
-                return null;
-            };
-            const res = win.add_child(cwgt) catch |e| {
-                cwgt.destroy();
-                handle_error(e, @src(), "");
-                return null;
-            };
-            return @ptrCast(Gui.WidPtr, res);
-        }
+        return @ptrCast(Gui.WidPtr, &win.widgetInst);
+    }
+    fn create_widget(parentWidget: Gui.WidPtr, nameId: Fw.String) callconv(.C) ?Gui.WidPtr {
+        var pW = @ptrCast(*Widget, parentWidget);
+        const cW = WidgetFactory.create(pW.get_renderer(), nameId.from()) catch |e| {
+            handle_error(e, @src(), "");
+            return null;
+        };
+        const res = pW.add_child(cW) catch |e| {
+            cW.destroy();
+            handle_error(e, @src(), "");
+            return null;
+        };
+        return @ptrCast(Gui.WidPtr, res);
     }
     fn set_widget_junction_point(widget: Gui.WidPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
         if(idx > 1) return false;
@@ -271,7 +263,7 @@ const Export = struct {
             handle_error(Error.NoRenderingContext, @src(), "");
             return null;
         }
-        const t = textures.load(windows.items[0].r, path.from()) catch |e| {
+        const t = textures.load(windows.items[0].b.renderer, path.from()) catch |e| {
             handle_error(e, @src(), "");
             return null;
         };
@@ -302,7 +294,7 @@ fn update(ctx: Fw.CbCtx) callconv(.C) void {
     _ = ctx;
     const startTime = core.nanotime();
     for (windows.items) |w| {
-        w.update() catch |e| {
+        w.run_update_all() catch |e| {
             handle_error(e, @src(), "");
         };
     }
@@ -330,77 +322,14 @@ pub const WidgetFactory = struct {
         .{ .key = "toolbox", .value = Toolbox.create, },
     };
 
-    pub fn create(mw: *MainWindow, nameId: []const u8) Error!Widget {
+    pub fn create(r: Render.Renderer, nameId: []const u8) Error!Widget {
         //TODO make binary search
         for (createMap) |elem| {
             if (std.mem.eql(u8, elem.key, nameId)) {
-                return elem.value(mw.r);
+                return elem.value(r);
             }
         }
         return Error.WidgetNotFound;
-    }
-};
-
-pub const MainWindow = struct {
-    c: Widget.ChildVec,
-    w: Render.Window,
-    r: Render.Renderer,
-
-    fn create(title: []const u8) Error!*MainWindow {
-        const w = Render.Window.create(title, Render.Size{ .x = 640, .y = 480, }, Render.Window.Flags{ .opengl = 1, })
-            catch |e| return convert_sdl2_error(e);
-        var window = allocator.create(MainWindow) catch return Error.OutOfMemory;
-        window.* = .{
-            .c = .{},
-            .w = w,
-            .r = Render.Renderer.create(w, .{ .accelerated = 1, }) catch |e| return convert_sdl2_error(e),
-        };
-        return window;
-    }
-
-    fn destroy(this: *MainWindow) void {
-        for (this.c.items) |item| {
-            item.destroy();
-        }
-        this.c.deinit(allocator);
-        this.r.destroy();
-        this.w.destroy();
-        allocator.destroy(this);
-    }
-
-    fn add_child(this: *MainWindow, wid: Widget) Error!*Widget {
-        const elem = this.*.c.addOne(allocator) catch return Error.OutOfMemory;
-        elem.* = wid;
-        return elem;
-    }
-
-    fn get_id(this: *MainWindow) u32 {
-        return this.w.getId();
-    }
-
-    fn handle_mouse_click(this: *MainWindow, pos: Render.IPoint) void {
-        _ = this;
-        _ = pos;
-        for (this.c.items) |item| {
-            const currArea = this.r.getViewport();
-            const areas = item.get_areas(currArea);
-            if (pos.inside(areas.dst)) {
-                item.handle_mouse_click(pos, areas.dst);
-                break;
-            }
-        }
-    }
-
-    fn update(this: *MainWindow) Error!void {
-        this.r.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return convert_sdl2_error(e);
-        const currArea = this.r.getViewport();
-        for (this.c.items) |item| {
-            const targAreas = item.get_areas(currArea);
-            this.r.setViewport(targAreas.dst) catch |e| return convert_sdl2_error(e);
-            item.update(this.r, targAreas) catch |e| return e;
-        }
-        this.r.setViewport(currArea) catch |e| return convert_sdl2_error(e);
-        this.r.present();
     }
 };
 
@@ -414,6 +343,7 @@ pub const Widget = struct {
         get_anchor:       fn (IPtr) Anchor,
         get_size:         fn (IPtr) Render.Size,
         get_areas:        fn (IPtr, Render.IRect) SrcDstArea,
+        get_renderer:     fn (IPtr) Render.Renderer,
         set_property_str: fn (IPtr, []const u8, []const u8) bool,
         set_property_int: fn (IPtr, []const u8, i64) bool,
         set_property_flt: fn (IPtr, []const u8, f64) bool,
@@ -433,6 +363,7 @@ pub const Widget = struct {
                 .get_anchor       = Widget.Funcs(T).get_anchor,
                 .get_size         = Widget.Funcs(T).get_size,
                 .get_areas        = Widget.Funcs(T).get_areas,
+                .get_renderer     = Widget.Funcs(T).get_renderer,
                 .set_property_str = Widget.Funcs(T).set_property_str,
                 .set_property_int = Widget.Funcs(T).set_property_int,
                 .set_property_flt = Widget.Funcs(T).set_property_flt,
@@ -544,6 +475,10 @@ pub const Widget = struct {
                 const this = @ptrCast(*T, inst);
                 return this.b.anchor.get_sd_area(this.b.size.toRect(), parArea);
             }
+            fn get_renderer(inst: IPtr) Render.Renderer {
+                const this = @ptrCast(*T, inst);
+                return this.b.renderer;
+            }
             fn set_property_str(inst: IPtr, name: []const u8, value: []const u8) bool {
                 var this = @ptrCast(*T, inst);
                 return this.set_property_str(name, value);
@@ -578,6 +513,11 @@ pub const Widget = struct {
                     try item.update(rend, targAreas);
                 }
                 rend.setViewport(currArea) catch |e| return convert_sdl2_error(e);
+                try this.updated(rend);
+            }
+            fn updated(inst: IPtr, rend: Render.Renderer) Error!void {
+                var this = @ptrCast(*T, inst);
+                this.updated(rend);
             }
             fn handle_mouse_click(inst: IPtr, pos: Render.IPoint, parentArea: Render.IRect) void {
                 var this = @ptrCast(*T, inst);
@@ -614,6 +554,9 @@ pub const Widget = struct {
     fn get_areas(wid: Widget, parArea: Render.IRect) SrcDstArea {
         return wid.vptr.get_areas(wid.inst, parArea);
     }
+    fn get_renderer(wid: Widget) Render.Renderer {
+        return wid.vptr.get_renderer(wid.inst);
+    }
     fn set_property_str(wid: Widget, name: []const u8, value: []const u8) bool {
         return wid.vptr.set_property_str(wid.inst, name, value);
     }
@@ -635,12 +578,122 @@ pub const Widget = struct {
     fn update(wid: Widget, rend: Render.Renderer, areas: Widget.SrcDstArea) Error!void {
         return wid.vptr.update(wid.inst, rend, areas);
     }
+    fn updated(wid: Widget, rend: Render.Renderer) Error!void {
+        return wid.vptr.update(wid.inst, rend);
+    }
     fn handle_mouse_click(wid: Widget, pos: Render.IPoint, parentArea: Render.IRect) void {
         return wid.vptr.handle_mouse_click(wid.inst, pos, parentArea);
     }
 
     vptr: VPtr,
     inst: IPtr,
+};
+
+pub const MainWindow = struct {
+    b: Widget.Base,
+    w: Render.Window,
+    widgetInst: Widget,
+
+    const virtual = Widget.Virtual.generate(MainWindow);
+
+    fn get_id(this: *MainWindow) u32 {
+        return this.w.getId();
+    }
+    fn run_update_all(this: *MainWindow) Error!void {
+        const w = this.widgetInst;
+        return w.update(this.b.renderer, undefined);
+    }
+    fn create(title: []const u8, size: Render.Size) Error!*MainWindow {
+        const w = Render.Window.create(title, size, Render.Window.Flags{ .opengl = 1, })
+            catch |e| return convert_sdl2_error(e);
+        var window = allocator.create(MainWindow) catch return Error.OutOfMemory;
+        window.* = .{
+            .b = .{
+                .size = size,
+                .renderer = Render.Renderer.create(w, .{ .accelerated = 1, }) catch |e| return convert_sdl2_error(e),
+            },
+            .w = w,
+            .widgetInst = .{
+                .inst = @ptrCast(IPtr, window),
+                .vptr = &virtual,
+            },
+        };
+        return window;
+    }
+    fn destroy(this: *MainWindow) void {
+        for (this.b.children.items) |item| {
+            item.destroy();
+        }
+        this.b.children.deinit(allocator);
+        this.b.renderer.destroy();
+        this.w.destroy();
+        allocator.destroy(this);
+    }
+    fn add_child(this: *MainWindow, wid: Widget) Error!*Widget {
+        const elem = this.*.b.children.addOne(allocator) catch return Error.OutOfMemory;
+        elem.* = wid;
+        return elem;
+    }
+    fn set_action(this: *MainWindow, name: []const u8, action: Fw.Action) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = action;
+        return false;
+    }
+    fn set_property_str(this: *MainWindow, name: []const u8, value: []const u8) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn set_property_int(this: *MainWindow, name: []const u8, value: i64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn set_property_flt(this: *MainWindow, name: []const u8, value: f64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn get_property_str(this: *const MainWindow, name: []const u8) callconv(.Inline) []const u8 {
+        _ = this;
+        _ = name;
+        return "";
+    }
+    fn get_property_int(this: *const MainWindow, name: []const u8) callconv(.Inline) i64 {
+        _ = this;
+        _ = name;
+        return 0;
+    }
+    fn get_property_flt(this: *const MainWindow, name: []const u8) callconv(.Inline) f64 {
+        _ = this;
+        _ = name;
+        return 0.0;
+    }
+    fn handle_mouse_click(this: *MainWindow, pos: Render.IPoint) void {
+        _ = this;
+        _ = pos;
+        for (this.b.children.items) |item| {
+            const currArea = this.b.renderer.getViewport();
+            const areas = item.get_areas(currArea);
+            if (pos.inside(areas.dst)) {
+                item.handle_mouse_click(pos, areas.dst);
+                break;
+            }
+        }
+    }
+    fn update(this: *MainWindow, rend: Render.Renderer, areas: Widget.SrcDstArea) Error!void {
+        _ = areas;
+        _ = rend;
+        this.b.renderer.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return convert_sdl2_error(e);
+    }
+    fn updated(this: *MainWindow, rend: Render.Renderer) Error!void {
+        _ = rend;
+        this.b.renderer.present();
+    }
 };
 
 const Toolbox = struct {
@@ -662,60 +715,55 @@ const Toolbox = struct {
     fn destroy(this: *Toolbox) callconv(.Inline) void {
         allocator.destroy(this);
     }
-
     fn set_action(this: *Toolbox, name: []const u8, action: Fw.Action) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = action;
         return false;
     }
-
     fn set_property_str(this: *Toolbox, name: []const u8, value: []const u8) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = value;
         return false;
     }
-
     fn set_property_int(this: *Toolbox, name: []const u8, value: i64) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = value;
         return false;
     }
-
     fn set_property_flt(this: *Toolbox, name: []const u8, value: f64) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = value;
         return false;
     }
-
     fn get_property_str(this: *const Toolbox, name: []const u8) callconv(.Inline) []const u8 {
         _ = this;
         _ = name;
         return "";
     }
-
     fn get_property_int(this: *const Toolbox, name: []const u8) callconv(.Inline) i64 {
         _ = this;
         _ = name;
         return 0;
     }
-
     fn get_property_flt(this: *const Toolbox, name: []const u8) callconv(.Inline) f64 {
         _ = this;
         _ = name;
         return 0.0;
     }
-
     fn update(this: *Toolbox, rend: Render.Renderer, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
         _ = this;
         _ = rend;
         _ = areas;
         rend.copyFull(buttonTemplate) catch |e| return convert_sdl2_error(e);
     }
-
+    fn updated(this: *Toolbox, rend: Render.Renderer) callconv(.Inline) Error!void {
+        _ = this;
+        _ = rend;
+    }
     fn handle_mouse_click(this: *Toolbox, pos: Render.IPoint) callconv(.Inline) void {
         _ = this;
         _ = pos;
@@ -748,13 +796,11 @@ const Button = struct {
         try button.draw_button();
         return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, button), };
     }
-
     fn destroy(this: *Button) callconv(.Inline) void {
         if (this.label.len != 0) allocator.free(this.label);
         this.texture.destroy();
         allocator.destroy(this);
     }
-
     fn draw_button(this: *Button) Error!void {
         {
             this.*.b.renderer.setTarget(this.*.texture) catch |e| return convert_sdl2_error(e);
@@ -778,7 +824,6 @@ const Button = struct {
             }
         }
     }
-
     fn set_action(this: *Button, name: []const u8, action: Fw.Action) callconv(.Inline) bool {
         if (std.mem.eql(u8, name, "click")) {
             this.actions.click = action;
@@ -786,7 +831,6 @@ const Button = struct {
         }
         return false;
     }
-
     fn set_property_str(this: *Button, name: []const u8, value: []const u8) callconv(.Inline) bool {
         if (std.mem.eql(u8, name, "label")) {
             if (this.label.len != 0) allocator.free(this.label);
@@ -802,45 +846,42 @@ const Button = struct {
         }
         return false;
     }
-
     fn set_property_int(this: *Button, name: []const u8, value: i64) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = value;
         return false;
     }
-
     fn set_property_flt(this: *Button, name: []const u8, value: f64) callconv(.Inline) bool {
         _ = this;
         _ = name;
         _ = value;
         return false;
     }
-
     fn get_property_str(this: *const Button, name: []const u8) callconv(.Inline) []const u8 {
         if (std.mem.eql(u8, name, "label")) {
             return this.label;
         }
         return "";
     }
-
     fn get_property_int(this: *const Button, name: []const u8) callconv(.Inline) i64 {
         _ = this;
         _ = name;
         return 0;
     }
-
     fn get_property_flt(this: *const Button, name: []const u8) callconv(.Inline) f64 {
         _ = this;
         _ = name;
         return 0.0;
     }
-
     fn update(this: *Button, rend: Render.Renderer, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
         rend.copyPartial(this.texture, areas.src) catch |e| return convert_sdl2_error(e);
         _ = this;
     }
-
+    fn updated(this: *Button, rend: Render.Renderer) callconv(.Inline) Error!void {
+        _ = this;
+        _ = rend;
+    }
     fn handle_mouse_click(this: *Button, pos: Render.IPoint) callconv(.Inline) void {
         _ = this;
         _ = pos;
