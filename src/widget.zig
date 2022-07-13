@@ -2,6 +2,7 @@ const gui = @import("gui.zig");
 
 const std = gui.std;
 const Error = gui.Error;
+const I = gui.I;
 const F = gui.F;
 const R = gui.R;
 const E = gui.E;
@@ -22,11 +23,11 @@ pub const WidgetFactory = struct {
         .{ .key = "toolbox", .value = Toolbox.create, },
     };
 
-    pub fn create(r: R.Renderer, nameId: []const u8) Error!Widget {
+    pub fn create(renderer: R.Renderer, nameId: []const u8) Error!Widget {
         //TODO make binary search
         for (createMap) |elem| {
             if (std.mem.eql(u8, elem.key, nameId)) {
-                return elem.value(r);
+                return elem.value(renderer);
             }
         }
         return Error.WidgetNotFound;
@@ -36,8 +37,9 @@ pub const WidgetFactory = struct {
 pub const Widget = struct {
 
     pub const Virtual = struct {
+        create:           fn (IPtr, []const u8) Error!Widget,
         destroy:          fn (IPtr) void,
-        add_child:        fn (IPtr, Widget) Error!*Widget,
+        to_export:        fn (IPtr) I.Widget,
         set_action:       fn (IPtr, []const u8, F.Action) bool,
         set_anchor:       fn (IPtr, Anchor) void,
         get_anchor:       fn (IPtr) Anchor,
@@ -51,27 +53,206 @@ pub const Widget = struct {
         get_property_int: fn (IPtr, []const u8) i64,
         get_property_flt: fn (IPtr, []const u8) f64,
         update:           fn (IPtr, SrcDstArea) Error!void,
-
         handle_mouse_click: fn (IPtr, R.IPoint, R.IRect) void,
 
+        fn Funcs(T: anytype) type {
+            return struct {
+                fn create(inst: IPtr, nameId: []const u8) Error!Widget {
+                    var this = @ptrCast(*T, inst);
+                    const ret = try WidgetFactory.create(this.b.renderer, nameId);
+                    try this.*.b.add_child(ret);
+                    return ret;
+                }
+                fn destroy(inst: IPtr) void {
+                    var this = @ptrCast(*T, inst);
+                    for (this.b.children.items) |item| {
+                        item.destroy();
+                    }
+                    this.b.children.deinit(gui.allocator);
+                    return this.*.destroy();
+                }
+                fn to_export(inst: IPtr) I.Widget {
+                    var this = @ptrCast(*T, inst);
+                    return .{ .data = @ptrCast(I.WdgPtr, this), .vptr = &T.vexport, };
+                }
+                fn set_action(inst: IPtr, name: []const u8, action: F.Action) bool {
+                    var this = @ptrCast(*T, inst);
+                    return this.set_action(name, action);
+                }
+                fn set_anchor(inst: IPtr, anchor: Anchor) void {
+                    const this = @ptrCast(*T, inst);
+                    this.b.anchor = anchor;
+                }
+                fn get_anchor(inst: IPtr) Anchor {
+                    const this = @ptrCast(*T, inst);
+                    return this.b.anchor;
+                }
+                fn get_size(inst: IPtr) R.Size {
+                    const this = @ptrCast(*T, inst);
+                    return this.b.size;
+                }
+                fn get_areas(inst: IPtr, parArea: R.IRect) SrcDstArea {
+                    const this = @ptrCast(*T, inst);
+                    return this.b.anchor.get_sd_area(this.b.size.toRect(), parArea);
+                }
+                fn get_renderer(inst: IPtr) R.Renderer {
+                    const this = @ptrCast(*T, inst);
+                    return this.b.renderer;
+                }
+                fn set_property_str(inst: IPtr, name: []const u8, value: []const u8) bool {
+                    var this = @ptrCast(*T, inst);
+                    return this.set_property_str(name, value);
+                }
+                fn set_property_int(inst: IPtr, name: []const u8, value: i64) bool {
+                    var this = @ptrCast(*T, inst);
+                    return this.set_property_int(name, value);
+                }
+                fn set_property_flt(inst: IPtr, name: []const u8, value: f64) bool {
+                    var this = @ptrCast(*T, inst);
+                    return this.set_property_flt(name, value);
+                }
+                fn get_property_str(inst: IPtr, name: []const u8) []const u8 {
+                    const this = @ptrCast(*T, inst);
+                    return this.get_property_str(name);
+                }
+                fn get_property_int(inst: IPtr, name: []const u8) i64 {
+                    const this = @ptrCast(*T, inst);
+                    return this.get_property_int(name);
+                }
+                fn get_property_flt(inst: IPtr, name: []const u8) f64 {
+                    const this = @ptrCast(*T, inst);
+                    return this.get_property_flt(name);
+                }
+                fn update(inst: IPtr, areas: SrcDstArea) Error!void {
+                    var this = @ptrCast(*T, inst);
+                    const currArea = this.b.renderer.getViewport();
+                    try this.update(areas);
+                    for (this.b.children.items) |item| {
+                        const targAreas = item.get_areas(currArea);
+                        this.b.renderer.setViewport(targAreas.dst) catch |e| return gui.convert_sdl2_error(e);
+                        try item.update(targAreas);
+                    }
+                    this.b.renderer.setViewport(currArea) catch |e| return gui.convert_sdl2_error(e);
+                    try this.updated();
+                }
+                fn updated(inst: IPtr) Error!void {
+                    var this = @ptrCast(*T, inst);
+                    this.updated();
+                }
+                fn handle_mouse_click(inst: IPtr, pos: R.IPoint, parentArea: R.IRect) void {
+                    var this = @ptrCast(*T, inst);
+                    for (this.b.children.items) |item| {
+                        const areas = item.get_areas(parentArea);
+                        if (pos.inside(areas.dst)) {
+                            item.handle_mouse_click(pos, areas.dst);
+                            break;
+                        }
+                    }
+                    this.handle_mouse_click(pos);
+                }
+            };
+        }
         fn generate(T: anytype) Virtual {
-            return Virtual{
-                .destroy          = Widget.Funcs(T).destroy,
-                .add_child        = Widget.Funcs(T).add_child,
-                .set_action       = Widget.Funcs(T).set_action,
-                .set_anchor       = Widget.Funcs(T).set_anchor,
-                .get_anchor       = Widget.Funcs(T).get_anchor,
-                .get_size         = Widget.Funcs(T).get_size,
-                .get_areas        = Widget.Funcs(T).get_areas,
-                .get_renderer     = Widget.Funcs(T).get_renderer,
-                .set_property_str = Widget.Funcs(T).set_property_str,
-                .set_property_int = Widget.Funcs(T).set_property_int,
-                .set_property_flt = Widget.Funcs(T).set_property_flt,
-                .get_property_str = Widget.Funcs(T).get_property_str,
-                .get_property_int = Widget.Funcs(T).get_property_int,
-                .get_property_flt = Widget.Funcs(T).get_property_flt,
-                .update           = Widget.Funcs(T).update,
-                .handle_mouse_click = Widget.Funcs(T).handle_mouse_click,
+            const f = Funcs(T);
+            return .{
+                .create             = f.create,
+                .destroy            = f.destroy,
+                .to_export          = f.to_export,
+                .set_action         = f.set_action,
+                .set_anchor         = f.set_anchor,
+                .get_anchor         = f.get_anchor,
+                .get_size           = f.get_size,
+                .get_areas          = f.get_areas,
+                .get_renderer       = f.get_renderer,
+                .set_property_str   = f.set_property_str,
+                .set_property_int   = f.set_property_int,
+                .set_property_flt   = f.set_property_flt,
+                .get_property_str   = f.get_property_str,
+                .get_property_int   = f.get_property_int,
+                .get_property_flt   = f.get_property_flt,
+                .update             = f.update,
+                .handle_mouse_click = f.handle_mouse_click,
+            };
+        }
+    };
+
+    pub const Export = struct {
+        fn Funcs(T: anytype) type {
+            return struct {
+                const funcs = Virtual.Funcs(T);
+                fn create(iwgt: I.WdgPtr, name: F.String) callconv(.C) I.Widget {
+                    const w = funcs.create(@ptrCast(IPtr, iwgt), name.from()) catch |e| {
+                        gui.handle_error(e, @src(), "");
+                        return @bitCast(I.Widget, gui.EmptyInterface);
+                    };
+                    return w.to_export();
+                }
+                fn destroy(iwgt: I.WdgPtr) callconv(.C) void {
+                    funcs.destroy(@ptrCast(IPtr, iwgt));
+                }
+                fn set_junction_point(iwgt: I.WdgPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
+                    if(idx > 1) return false;
+                    const i = @ptrCast(IPtr, iwgt);
+                    var anchor = funcs.get_anchor(i);
+                    anchor.b[idx] = Binding{
+                        .p = R.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
+                        .c = R.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
+                    };
+                    funcs.set_anchor(i, anchor);
+                    return true;
+                }
+                fn reset_junction_point(iwgt: I.WdgPtr, idx: u8) callconv(.C) bool {
+                    if(idx > 1) return false;
+                    const i = @ptrCast(IPtr, iwgt);
+                    const bind = funcs.get_anchor(i).b[@intCast(u1, idx) +% 1];
+                    const anchor = Anchor{ .b = .{ bind, bind } };
+                    funcs.set_anchor(i, anchor);
+                    return true;
+                }
+                fn set_property_str(iwgt: I.WdgPtr, name: F.String, value: F.String) callconv(.C) bool {
+                    const i = @ptrCast(IPtr, iwgt);
+                    return funcs.set_property_str(i, name.from(), value.from());
+                }
+                fn set_property_int(iwgt: I.WdgPtr, name: F.String, value: i64) callconv(.C) bool {
+                    const i = @ptrCast(IPtr, iwgt);
+                    return funcs.set_property_int(i, name.from(), value);
+                }
+                fn set_property_flt(iwgt: I.WdgPtr, name: F.String, value: f64) callconv(.C) bool {
+                    const i = @ptrCast(IPtr, iwgt);
+                    return funcs.set_property_flt(i, name.from(), value);
+                }
+                fn get_property_str(iwgt: I.WdgPtr, name: F.String) callconv(.C) F.String {
+                    const i = @ptrCast(IPtr, iwgt);
+                    const ret = funcs.get_property_str(i, name.from());
+                    return F.String.init(ret);
+                }
+                fn get_property_int(iwgt: I.WdgPtr, name: F.String) callconv(.C) i64 {
+                    const i = @ptrCast(IPtr, iwgt);
+                    return funcs.get_property_int(i, name.from());
+                }
+                fn get_property_flt(iwgt: I.WdgPtr, name: F.String) callconv(.C) f64 {
+                    const i = @ptrCast(IPtr, iwgt);
+                    return funcs.get_property_flt(i, name.from());
+                }
+                fn get_original() callconv(.C) usize {
+                    return @ptrToInt(&T.virtual);
+                }
+            };
+        }
+        fn generate(T: anytype) I.WidgetVirtual {
+            const exp = Export.Funcs(T);
+            return .{
+                .create               = exp.create,
+                .destroy              = exp.destroy,
+                .set_junction_point   = exp.set_junction_point,
+                .reset_junction_point = exp.reset_junction_point,
+                .set_property_str     = exp.set_property_str,
+                .set_property_int     = exp.set_property_int,
+                .set_property_flt     = exp.set_property_flt,
+                .get_property_str     = exp.get_property_str,
+                .get_property_int     = exp.get_property_int,
+                .get_property_flt     = exp.get_property_flt,
+                .__original           = exp.get_original,
             };
         }
     };
@@ -134,109 +315,23 @@ pub const Widget = struct {
         anchor:   Anchor   = .{},
         size:     R.Size = .{},
 
-        fn add_child(this: *Base, wid: Widget) Error!*Widget {
+        fn add_child(this: *Base, wid: Widget) Error!void {
             const elem = this.*.children.addOne(gui.allocator) catch return Error.OutOfMemory;
             elem.* = wid;
-            return elem;
         }
     };
 
     const VPtr = *const Virtual;
-
-    fn Funcs(T: anytype) type {
-        return struct {
-            fn destroy(inst: IPtr) void {
-                var this = @ptrCast(*T, inst);
-                for (this.b.children.items) |item| {
-                    item.destroy();
-                }
-                this.b.children.deinit(gui.allocator);
-                return this.*.destroy();
-            }
-            fn add_child(inst: IPtr, wid: Widget) Error!*Widget {
-                var this = @ptrCast(*T, inst);
-                return this.*.b.add_child(wid);
-            }
-            fn set_action(inst: IPtr, name: []const u8, action: F.Action) bool {
-                var this = @ptrCast(*T, inst);
-                return this.set_action(name, action);
-            }
-            fn set_anchor(inst: IPtr, anchor: Anchor) void {
-                const this = @ptrCast(*T, inst);
-                this.b.anchor = anchor;
-            }
-            fn get_anchor(inst: IPtr) Anchor {
-                const this = @ptrCast(*T, inst);
-                return this.b.anchor;
-            }
-            fn get_size(inst: IPtr) R.Size {
-                const this = @ptrCast(*T, inst);
-                return this.b.size;
-            }
-            fn get_areas(inst: IPtr, parArea: R.IRect) SrcDstArea {
-                const this = @ptrCast(*T, inst);
-                return this.b.anchor.get_sd_area(this.b.size.toRect(), parArea);
-            }
-            fn get_renderer(inst: IPtr) R.Renderer {
-                const this = @ptrCast(*T, inst);
-                return this.b.renderer;
-            }
-            fn set_property_str(inst: IPtr, name: []const u8, value: []const u8) bool {
-                var this = @ptrCast(*T, inst);
-                return this.set_property_str(name, value);
-            }
-            fn set_property_int(inst: IPtr, name: []const u8, value: i64) bool {
-                var this = @ptrCast(*T, inst);
-                return this.set_property_int(name, value);
-            }
-            fn set_property_flt(inst: IPtr, name: []const u8, value: f64) bool {
-                var this = @ptrCast(*T, inst);
-                return this.set_property_flt(name, value);
-            }
-            fn get_property_str(inst: IPtr, name: []const u8) []const u8 {
-                const this = @ptrCast(*T, inst);
-                return this.get_property_str(name);
-            }
-            fn get_property_int(inst: IPtr, name: []const u8) i64 {
-                const this = @ptrCast(*T, inst);
-                return this.get_property_int(name);
-            }
-            fn get_property_flt(inst: IPtr, name: []const u8) f64 {
-                const this = @ptrCast(*T, inst);
-                return this.get_property_flt(name);
-            }
-            fn update(inst: IPtr, areas: SrcDstArea) Error!void {
-                var this = @ptrCast(*T, inst);
-                const currArea = this.b.renderer.getViewport();
-                try this.update(areas);
-                for (this.b.children.items) |item| {
-                    const targAreas = item.get_areas(currArea);
-                    this.b.renderer.setViewport(targAreas.dst) catch |e| return gui.convert_sdl2_error(e);
-                    try item.update(targAreas);
-                }
-                this.b.renderer.setViewport(currArea) catch |e| return gui.convert_sdl2_error(e);
-                try this.updated();
-            }
-            fn updated(inst: IPtr) Error!void {
-                var this = @ptrCast(*T, inst);
-                this.updated();
-            }
-            fn handle_mouse_click(inst: IPtr, pos: R.IPoint, parentArea: R.IRect) void {
-                var this = @ptrCast(*T, inst);
-                for (this.b.children.items) |item| {
-                    const areas = item.get_areas(parentArea);
-                    if (pos.inside(areas.dst)) {
-                        item.handle_mouse_click(pos, areas.dst);
-                        break;
-                    }
-                }
-                this.handle_mouse_click(pos);
-            }
-        };
+    
+    pub fn convert(iwgt: I.Widget) Widget {
+        return .{ .inst = @ptrCast(IPtr, iwgt.data), .vptr = @intToPtr(VPtr, iwgt.vptr.__original()), };
     }
 
     pub fn destroy(wid: Widget) void {
         return wid.vptr.destroy(wid.inst);
+    }
+    pub fn to_export(wid: Widget) I.Widget {
+        return wid.vptr.to_export(wid.inst);
     }
     pub fn add_child(wid: Widget, child: Widget) Error!*Widget {
         return wid.vptr.add_child(wid.inst, child);
@@ -297,6 +392,7 @@ pub const MainWindow = struct {
     widgetInst: Widget,
 
     const virtual = Widget.Virtual.generate(MainWindow);
+    const vexport = Widget.Export.generate(MainWindow);
 
     pub fn get_id(this: *MainWindow) u32 {
         return this.w.getId();
@@ -383,6 +479,7 @@ const Toolbox = struct {
     b: Widget.Base,
 
     const virtual = Widget.Virtual.generate(Toolbox);
+    const vexport = Widget.Export.generate(Toolbox);
 
     fn create(rend: R.Renderer) Error!Widget {
         var toolbox = gui.allocator.create(Toolbox) catch return Error.OutOfMemory;
@@ -394,7 +491,6 @@ const Toolbox = struct {
         };
         return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, toolbox), };
     }
-
     fn destroy(this: *Toolbox) callconv(.Inline) void {
         gui.allocator.destroy(this);
     }
@@ -461,6 +557,7 @@ const Button = struct {
     };
 
     const virtual = Widget.Virtual.generate(Button);
+    const vexport = Widget.Export.generate(Button);
 
     fn create(rend: R.Renderer) Error!Widget {
         var button = gui.allocator.create(Button) catch return Error.OutOfMemory;
