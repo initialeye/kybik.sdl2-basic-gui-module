@@ -39,6 +39,7 @@ pub const Widget = struct {
     pub const Virtual = struct {
         create:           fn (IPtr, []const u8) Error!Widget,
         destroy:          fn (IPtr) void,
+        convert:          fn (IPtr, I.InterfaceId) I.GenericInterface,
         to_export:        fn (IPtr) I.Widget,
         set_action:       fn (IPtr, []const u8, F.Action) bool,
         set_anchor:       fn (IPtr, Anchor) void,
@@ -71,9 +72,12 @@ pub const Widget = struct {
                     this.b.children.deinit(gui.allocator);
                     return this.*.destroy();
                 }
+                fn convert(inst: IPtr, iid: I.InterfaceId) I.GenericInterface {
+                    return @ptrCast(*T, inst).convertWidget(iid);
+                }
                 fn to_export(inst: IPtr) I.Widget {
-                    var this = @ptrCast(*T, inst);
-                    return .{ .data = @ptrCast(I.WdgPtr, this), .vptr = &T.vexport, };
+                    const this = @ptrCast(*T, inst);
+                    return .{ .data = @ptrCast(I.WdgPtr, this), .vptr = &T.vwidget, };
                 }
                 fn set_action(inst: IPtr, name: []const u8, action: F.Action) bool {
                     var this = @ptrCast(*T, inst);
@@ -157,6 +161,7 @@ pub const Widget = struct {
             return .{
                 .create             = f.create,
                 .destroy            = f.destroy,
+                .convert            = f.convert,
                 .to_export          = f.to_export,
                 .set_action         = f.set_action,
                 .set_anchor         = f.set_anchor,
@@ -180,10 +185,13 @@ pub const Widget = struct {
         fn Funcs(T: anytype) type {
             return struct {
                 const funcs = Virtual.Funcs(T);
+                fn convert(iwgt: I.WdgPtr, iid: I.InterfaceId) callconv(.C) I.GenericInterface {
+                    return funcs.convert(@ptrCast(IPtr, iwgt), iid);
+                }
                 fn create(iwgt: I.WdgPtr, name: F.String) callconv(.C) I.Widget {
                     const w = funcs.create(@ptrCast(IPtr, iwgt), name.from()) catch |e| {
                         gui.handle_error(e, @src(), "");
-                        return @bitCast(I.Widget, gui.EmptyInterface);
+                        return @bitCast(I.Widget, I.GenericInterface.zero);
                     };
                     return w.to_export();
                 }
@@ -244,6 +252,7 @@ pub const Widget = struct {
             return .{
                 .create               = exp.create,
                 .destroy              = exp.destroy,
+                .convert              = exp.convert,
                 .set_junction_point   = exp.set_junction_point,
                 .reset_junction_point = exp.reset_junction_point,
                 .set_property_str     = exp.set_property_str,
@@ -322,13 +331,12 @@ pub const Widget = struct {
     };
 
     const VPtr = *const Virtual;
-    
-    pub fn convert(iwgt: I.Widget) Widget {
-        return .{ .inst = @ptrCast(IPtr, iwgt.data), .vptr = @intToPtr(VPtr, iwgt.vptr.__original()), };
-    }
 
     pub fn destroy(wid: Widget) void {
         return wid.vptr.destroy(wid.inst);
+    }
+    pub fn to_internal(iwgt: I.Widget) Widget {
+        return .{ .inst = @ptrCast(IPtr, iwgt.data), .vptr = @intToPtr(VPtr, iwgt.vptr.__original()), };
     }
     pub fn to_export(wid: Widget) I.Widget {
         return wid.vptr.to_export(wid.inst);
@@ -392,7 +400,8 @@ pub const MainWindow = struct {
     widgetInst: Widget,
 
     const virtual = Widget.Virtual.generate(MainWindow);
-    const vexport = Widget.Export.generate(MainWindow);
+    const vwidget = Widget.Export.generate(MainWindow);
+    const vwindow = Export.generate();
 
     pub fn get_id(this: *MainWindow) u32 {
         return this.w.getId();
@@ -422,6 +431,18 @@ pub const MainWindow = struct {
         this.b.renderer.destroy();
         this.w.destroy();
         gui.allocator.destroy(this);
+    }
+    fn convertWidget(this: *MainWindow, iid: I.InterfaceId) I.GenericInterface {
+        return switch(iid) {
+            .Window => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vwindow), },
+            else => return I.GenericInterface.zero,
+        };
+    }
+    fn convertWindow(this: *MainWindow, iid: I.InterfaceId) I.GenericInterface {
+        return switch(iid) {
+            .Widget => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vwidget), },
+            else => return I.GenericInterface.zero,
+        };
     }
     fn set_action(this: *MainWindow, name: []const u8, action: F.Action) callconv(.Inline) bool {
         _ = this;
@@ -473,13 +494,29 @@ pub const MainWindow = struct {
     fn updated(this: *MainWindow) Error!void {
         this.b.renderer.present();
     }
+    const Export = struct {
+        const Funcs = struct {
+            fn convert(iwgt: I.WinPtr, iid: I.InterfaceId) callconv(.C) I.GenericInterface {
+                return MainWindow.convertWindow(@ptrCast(*MainWindow, iwgt), iid);
+            }
+            fn destroy(iwgt: I.WinPtr) callconv(.C) void {
+                MainWindow.destroy(@ptrCast(*MainWindow, iwgt));
+            }
+        };
+        fn generate() I.WindowVirtual {
+            return .{
+                .convert = Funcs.convert,
+                .destroy = Funcs.destroy,
+            };
+        }
+    };
 };
 
 const Toolbox = struct {
     b: Widget.Base,
 
     const virtual = Widget.Virtual.generate(Toolbox);
-    const vexport = Widget.Export.generate(Toolbox);
+    const vwidget = Widget.Export.generate(Toolbox);
 
     fn create(rend: R.Renderer) Error!Widget {
         var toolbox = gui.allocator.create(Toolbox) catch return Error.OutOfMemory;
@@ -493,6 +530,11 @@ const Toolbox = struct {
     }
     fn destroy(this: *Toolbox) callconv(.Inline) void {
         gui.allocator.destroy(this);
+    }
+    fn convertWidget(this: *Toolbox, iid: I.InterfaceId) I.GenericInterface {
+        _ = iid;
+        _ = this;
+        return I.GenericInterface.zero;
     }
     fn set_action(this: *Toolbox, name: []const u8, action: F.Action) callconv(.Inline) bool {
         _ = this;
@@ -557,7 +599,7 @@ const Button = struct {
     };
 
     const virtual = Widget.Virtual.generate(Button);
-    const vexport = Widget.Export.generate(Button);
+    const vwidget = Widget.Export.generate(Button);
 
     fn create(rend: R.Renderer) Error!Widget {
         var button = gui.allocator.create(Button) catch return Error.OutOfMemory;
@@ -577,6 +619,11 @@ const Button = struct {
         if (this.label.len != 0) gui.allocator.free(this.label);
         this.texture.destroy();
         gui.allocator.destroy(this);
+    }
+    fn convertWidget(this: *Button, iid: I.InterfaceId) I.GenericInterface {
+        _ = iid;
+        _ = this;
+        return I.GenericInterface.zero;
     }
     fn draw_button(this: *Button) Error!void {
         {

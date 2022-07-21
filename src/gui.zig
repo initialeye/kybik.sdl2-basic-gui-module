@@ -5,8 +5,6 @@ pub const W = @import("widget.zig");
 pub const R = @import("render.zig");
 pub const E = @import("events.zig");
 
-pub const EmptyInterface = [2]usize { 0, 0 };
-
 pub const Vector = std.ArrayListUnmanaged;
 
 pub var core: *const F.Core = undefined;
@@ -162,7 +160,7 @@ const Export = struct {
     fn create_window(title: F.String, x: u16, y: u16) callconv(.C) I.Widget {
         var res = W.MainWindow.create(title.from(), .{ .x = @intCast(i16, x), .y = @intCast(i16, y), }) catch |e| {
             handle_error(e, @src(), "");
-            return @bitCast(I.Widget, EmptyInterface);
+            return @bitCast(I.Widget, I.GenericInterface.zero);
         };
         windows.append(allocator, res) catch handle_error(Error.OutOfMemory, @src(), "");
         if (textureInitialized == false) {
