@@ -15,7 +15,7 @@ pub var resources: []const u8 = undefined;
 pub var textures: R.TextureStorage = .{};
 pub var font: R.Font = undefined;
 
-pub var textureInitialized = false;
+pub var firstWindowCreated = false;
 pub var buttonTemplate: R.Texture = undefined;
 
 var mtx: std.Thread.Mutex = .{};
@@ -137,7 +137,7 @@ fn quit() callconv(.C) void {
         w.widgetInst.destroy();
     }
     windows.deinit(allocator);
-    if (textureInitialized) {
+    if (firstWindowCreated) {
         buttonTemplate.destroy();
     }
     font.destroy();
@@ -163,18 +163,12 @@ const Export = struct {
             return @bitCast(I.Widget, I.GenericInterface.zero);
         };
         windows.append(allocator, res) catch handle_error(Error.OutOfMemory, @src(), "");
-        if (textureInitialized == false) {
-            const size = R.Size{ .x = 128, .y = 64, };
-            const surf = R.drawButtonTemplate(size) catch |e| {
+        if (firstWindowCreated == false) {
+            init_after_win_init(res.b.renderer) catch |e| {
                 handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
                 return res.widgetInst.to_export();
             };
-            defer surf.destroy();
-            buttonTemplate = R.Texture.createSurface(res.b.renderer, surf) catch |e| {
-                handle_error(convert_sdl2_error(e), @src(), "failed to create button background");
-                return res.widgetInst.to_export();
-            };
-            textureInitialized = true;
+            firstWindowCreated = true;
         }
         return res.widgetInst.to_export();
     }
@@ -230,3 +224,18 @@ pub fn mouse_clicked(winId: u32, pos: R.IPoint) void {
     }
 }
 
+fn init_after_win_init(r: R.Renderer) R.Error!void {
+    const size = R.Size{ .x = 128, .y = 64, };
+    const surf = try R.drawButtonTemplate(size);
+    defer surf.destroy();
+    buttonTemplate = try R.Texture.createSurface(r, surf);
+    load_textures();
+}
+
+fn load_textures() void {
+    core.iterate_files(module, F.String.init("texture"), F.String.init(""), load_textures_cb);
+}
+fn load_textures_cb(name: F.String, fullpath: F.String) callconv(.C) void {
+    _ = fullpath;
+    _ = Export.load_texture(name);
+}
