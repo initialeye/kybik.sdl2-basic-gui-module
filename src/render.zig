@@ -33,20 +33,21 @@ pub const TextureStorage = struct {
     pub fn destroy(this: *@This()) void {
         var iter = this.data.iterator();
         while(iter.next()) |entry| {
-            gui.allocator.free(entry.key_ptr.*);
             entry.value_ptr.destroy();
         }
         this.data.deinit(gui.allocator);
     }
     pub fn load(this: *@This(), rend: Renderer, file: []const u8) gui.Error!Texture {
         var paths = [_][]const u8 { gui.resources, "./texture/", file, };
+        var pathsPartial = [_][]const u8 { "./texture/", file, };
         const fullpath = std.fs.path.joinZ(gui.allocator, paths[0..]) catch return gui.Error.OutOfMemory;
         defer gui.allocator.free(fullpath);
+        const partpath = std.fs.path.join(gui.allocator, pathsPartial[0..]) catch return gui.Error.OutOfMemory;
+        defer gui.allocator.free(partpath);
         
         const tex = image.loadTexture(rend, fullpath) catch return gui.Error.TextureLoadFailed;
         errdefer tex.destroy();
-        const fileDup = gui.allocator.dupe(u8, file) catch return gui.Error.OutOfMemory;
-        var v = this.data.getOrPut(gui.allocator, fileDup) catch return gui.Error.OutOfMemory;
+        var v = this.data.getOrPut(gui.allocator, partpath) catch return gui.Error.OutOfMemory;
         v.value_ptr.* = tex;
         return v.value_ptr.*;
     }

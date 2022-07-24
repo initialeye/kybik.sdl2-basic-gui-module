@@ -76,7 +76,11 @@ pub const Error = error {
 pub fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
     _ = src;
     switch (e) {
-        else => return,
+        error.OutOfMemory        => core.log(module, F.LogLevel.Critical, F.String.init("Allocation failed - no memory to use.")),
+        error.RenderFailed       => core.log(module, F.LogLevel.Error, F.String.init("Rendering failed.")),
+        error.WidgetNotFound     => core.log(module, F.LogLevel.Error, F.String.init("Unable to find widget.")),
+        error.NoRenderingContext => core.log(module, F.LogLevel.Error, F.String.init("Trying to use renderer, but no context found.")),
+        error.TextureLoadFailed  => core.log(module, F.LogLevel.Error, F.String.init("Texture load failed.")),
     }
     _ = optMsg;
 }
