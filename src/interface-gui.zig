@@ -31,6 +31,8 @@ pub const ModuleVirtual = extern struct {
     create_window: fn(Fw.String, u16, u16) callconv(.C) Widget,
     load_texture: fn(Fw.String) callconv(.C) ?Texture,
     get_texture: fn(Fw.String) callconv(.C) ?Texture,
+    get_texture_count: fn() callconv(.C) usize,
+    get_texture_path: fn(usize) callconv(.C) Fw.String,
     get_texture_size: fn(Texture) callconv(.C) TextureSize,
 };
 

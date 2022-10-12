@@ -21,6 +21,7 @@ pub const WidgetFactory = struct {
     const createMap = [_]CreateMapElement{
         .{ .key = "button", .value = Button.create, },
         .{ .key = "toolbox", .value = Toolbox.create, },
+        .{ .key = "sandbox", .value = Sandbox.create, },
     };
 
     pub fn create(renderer: R.Renderer, nameId: []const u8) Error!Widget {
@@ -510,6 +511,157 @@ pub const MainWindow = struct {
             };
         }
     };
+};
+
+const Sandbox = struct {
+    b: Widget.Base,
+    mapm: MapMesh = .{},
+    uTxs: Vector(R.LabeledTexture) = .{},
+    objs: Vector(Object) = .{},
+
+    const virtual = Widget.Virtual.generate(@This());
+    const vwidget = Widget.Export.generate(@This());
+
+    const MapMesh = struct {
+        const Cell = struct {
+            texId: u32,
+            height: FatMapPoint,
+        };
+        const CellList = std.MultiArrayList(Cell);
+        mesh: CellList = .{},
+        width: u32 = 0,
+
+        fn create(w: u32, h: u32, usedTextureId: u32) MapMesh {
+            return .{
+                .width = w,
+                .mesh = CellList.resize(gui.allocator, w*h),
+                .texId = usedTextureId,
+            };
+        }
+        fn destroy(this: *MapMesh) void {
+            this.mesh.deinit(gui.allocator);
+        }
+        fn width(this: *const MapMesh) u32 {
+            return this.w;
+        }
+        fn height(this: *const MapMesh) u32 {
+            return @intCast(u32, this.mesh.len/@intCast(usize, this.w));
+        }
+    };
+    const FatMapPoint = packed struct {
+        b: i24 = 0,
+        l: u8 = 0,
+        
+        fn set(i: i32) FatMapPoint {
+            return @bitCast(FatMapPoint, i);
+        }
+        fn get(p: FatMapPoint) i32 {
+            return @bitCast(i32, p);
+        }
+    };
+    pub const PointOfView = struct {
+        posX:   FatMapPoint = .{},
+        posY:   FatMapPoint = .{},
+        deltaX: FatMapPoint = .{},
+        deltaY: FatMapPoint = .{},
+        scale: f32 = 1.0,
+    };
+    const Object = struct {
+        texId: u32,
+        state: u32,
+        x: FatMapPoint,
+        y: FatMapPoint,
+        z: FatMapPoint,
+    };
+
+    fn create(rend: R.Renderer) Error!Widget {
+        var sandbox = gui.allocator.create(Sandbox) catch return Error.OutOfMemory;
+        sandbox.* = .{
+            .b = .{
+                .renderer = rend,
+                .size = .{ .x = 0, .y = 0, },
+            }
+        };
+        sandbox.uTxs.append(gui.allocator, gui.textures.get_labeled("./texture/tower.bmp") orelse unreachable)
+             catch return Error.OutOfMemory;
+        sandbox.uTxs.append(gui.allocator, gui.textures.get_labeled("./texture/spawner.bmp") orelse unreachable)
+             catch return Error.OutOfMemory;
+        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, sandbox), };
+    }
+    fn destroy(this: *Sandbox) callconv(.Inline) void {
+        this.uTxs.deinit(gui.allocator);
+        gui.allocator.destroy(this);
+    }
+    fn convertWidget(this: *Sandbox, iid: I.InterfaceId) I.GenericInterface {
+        _ = iid;
+        _ = this;
+        return I.GenericInterface.zero;
+    }
+    fn set_action(this: *Sandbox, name: []const u8, action: F.Action) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = action;
+        return false;
+    }
+    fn set_property_str(this: *Sandbox, name: []const u8, value: []const u8) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn set_property_int(this: *Sandbox, name: []const u8, value: i64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn set_property_flt(this: *Sandbox, name: []const u8, value: f64) callconv(.Inline) bool {
+        _ = this;
+        _ = name;
+        _ = value;
+        return false;
+    }
+    fn get_property_str(this: *const Sandbox, name: []const u8) callconv(.Inline) []const u8 {
+        _ = this;
+        _ = name;
+        return "";
+    }
+    fn get_property_int(this: *const Sandbox, name: []const u8) callconv(.Inline) i64 {
+        _ = this;
+        _ = name;
+        return 0;
+    }
+    fn get_property_flt(this: *const Sandbox, name: []const u8) callconv(.Inline) f64 {
+        _ = this;
+        _ = name;
+        return 0.0;
+    }
+    fn update(this: *Sandbox, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
+        _ = areas;
+        this.b.renderer.copyFull(gui.buttonTemplate) catch |e| return gui.convert_sdl2_error(e);
+    }
+    fn updated(this: *Sandbox) callconv(.Inline) Error!void {
+        _ = this;
+    }
+    fn handle_mouse_click(this: *Sandbox, pos: R.IPoint) callconv(.Inline) void {
+        _ = this;
+        _ = pos;
+    }
+    fn init(this: *Sandbox, width: u32, height: u32) callconv(.Inline) void {
+        this.mapm = MapMesh.create(width, height, 0);
+    }
+    fn register_texture(this: *Sandbox, tid: []const i8) callconv(.Inline) u32 {
+        const texture = gui.textures.get(tid) orelse {
+            gui.handle_error(.ObjectNotFound, @src(), tid);
+            return 0; //default texture
+        };
+        const ret = @intCast(u32, this.uTxs.items.len);
+        this.uTxs.append(gui.allocator, .{.path = gui.allocator.dupe(tid), .text = texture,});
+        return ret;
+    }
+    //fn get_visible_area()
+    //fn update_field(vis_area, field_vector);
+    //fn update_objects(vis_area, obj_vecror);
 };
 
 const Toolbox = struct {

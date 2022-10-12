@@ -54,6 +54,8 @@ const vptr = I.ModuleVirtual {
     .create_window = Export.create_window,
     .load_texture = Export.load_texture,
     .get_texture = Export.get_texture,
+    .get_texture_count = Export.get_texture_count,
+    .get_texture_path = Export.get_texture_path,
     .get_texture_size = Export.get_texture_size,
 };
 
@@ -71,6 +73,7 @@ pub const Error = error {
     WidgetNotFound,
     NoRenderingContext,
     TextureLoadFailed,
+    ObjectNotFound,
 };
 
 pub fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
@@ -81,6 +84,7 @@ pub fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u
         error.WidgetNotFound     => core.log(module, F.LogLevel.Error, F.String.init("Unable to find widget.")),
         error.NoRenderingContext => core.log(module, F.LogLevel.Error, F.String.init("Trying to use renderer, but no context found.")),
         error.TextureLoadFailed  => core.log(module, F.LogLevel.Error, F.String.init("Texture load failed.")),
+        error.ObjectNotFound     => core.log(module, F.LogLevel.Error, F.String.init("Object not found.")),
     }
     _ = optMsg;
 }
@@ -186,10 +190,16 @@ const Export = struct {
             return null;
         };
         return @intToPtr(I.Texture, @bitCast(usize, t));
-    }
+    }   
     fn get_texture(path: F.String) callconv(.C) ?I.Texture {
         const t = textures.get(path.from()) orelse return null;
         return @intToPtr(I.Texture, @bitCast(usize, t));
+    }
+    fn get_texture_count() callconv(.C) usize {
+        return textures.count();
+    }
+    fn get_texture_path(index: usize) callconv(.C) F.String {
+        return F.String.init(textures.get_index_path(index) orelse "");
     }
     fn get_texture_size(tex: I.Texture) callconv(.C) I.TextureSize {
         const t = @bitCast(R.Texture, @ptrToInt(tex));
