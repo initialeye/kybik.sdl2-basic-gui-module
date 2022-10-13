@@ -43,10 +43,8 @@ pub const Widget = struct {
         convert:          fn (IPtr, I.InterfaceId) I.GenericInterface,
         to_export:        fn (IPtr) I.Widget,
         set_action:       fn (IPtr, []const u8, F.Action) bool,
-        set_anchor:       fn (IPtr, Anchor) void,
-        get_anchor:       fn (IPtr) Anchor,
         get_size:         fn (IPtr) R.Size,
-        get_areas:        fn (IPtr, R.IRect) SrcDstArea,
+        get_borders:      fn (IPtr) Borders,
         get_renderer:     fn (IPtr) R.Renderer,
         set_property_str: fn (IPtr, []const u8, []const u8) bool,
         set_property_int: fn (IPtr, []const u8, i64) bool,
@@ -54,7 +52,7 @@ pub const Widget = struct {
         get_property_str: fn (IPtr, []const u8) []const u8,
         get_property_int: fn (IPtr, []const u8) i64,
         get_property_flt: fn (IPtr, []const u8) f64,
-        update:           fn (IPtr, SrcDstArea) Error!void,
+        update:           fn (IPtr, R.FRect) Error!void,
         handle_mouse_click: fn (IPtr, R.IPoint, R.IRect) void,
 
         fn Funcs(T: anytype) type {
@@ -84,21 +82,13 @@ pub const Widget = struct {
                     var this = @ptrCast(*T, inst);
                     return this.set_action(name, action);
                 }
-                fn set_anchor(inst: IPtr, anchor: Anchor) void {
-                    const this = @ptrCast(*T, inst);
-                    this.b.anchor = anchor;
-                }
-                fn get_anchor(inst: IPtr) Anchor {
-                    const this = @ptrCast(*T, inst);
-                    return this.b.anchor;
-                }
                 fn get_size(inst: IPtr) R.Size {
                     const this = @ptrCast(*T, inst);
                     return this.b.size;
                 }
-                fn get_areas(inst: IPtr, parArea: R.IRect) SrcDstArea {
+                fn get_borders(inst: IPtr) Borders {
                     const this = @ptrCast(*T, inst);
-                    return this.b.anchor.get_sd_area(this.b.size.toRect(), parArea);
+                    return this.b.borders;
                 }
                 fn get_renderer(inst: IPtr) R.Renderer {
                     const this = @ptrCast(*T, inst);
@@ -128,16 +118,15 @@ pub const Widget = struct {
                     const this = @ptrCast(*T, inst);
                     return this.get_property_flt(name);
                 }
-                fn update(inst: IPtr, areas: SrcDstArea) Error!void {
+                fn update(inst: IPtr, curArea: R.FRect) Error!void {
                     var this = @ptrCast(*T, inst);
-                    const currArea = this.b.renderer.getViewport();
-                    try this.update(areas);
+                    try this.update(curArea);
                     for (this.b.children.items) |item| {
-                        const targAreas = item.get_areas(currArea);
-                        this.b.renderer.setViewport(targAreas.dst) catch |e| return gui.convert_sdl2_error(e);
-                        try item.update(targAreas);
+                        const targArea = item.get_borders().get_destination_area(curArea);
+                        this.b.renderer.setViewport(targArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
+                        try item.update(targArea);
                     }
-                    this.b.renderer.setViewport(currArea) catch |e| return gui.convert_sdl2_error(e);
+                    this.b.renderer.setViewport(curArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
                     try this.updated();
                 }
                 fn updated(inst: IPtr) Error!void {
@@ -147,9 +136,9 @@ pub const Widget = struct {
                 fn handle_mouse_click(inst: IPtr, pos: R.IPoint, parentArea: R.IRect) void {
                     var this = @ptrCast(*T, inst);
                     for (this.b.children.items) |item| {
-                        const areas = item.get_areas(parentArea);
-                        if (pos.inside(areas.dst)) {
-                            item.handle_mouse_click(pos, areas.dst);
+                        const targArea = item.get_borders().get_destination_area(parentArea.toFloat());
+                        if (pos.inside(targArea.toInt())) {
+                            item.handle_mouse_click(pos,targArea.toInt());
                             break;
                         }
                     }
@@ -165,10 +154,8 @@ pub const Widget = struct {
                 .convert            = f.convert,
                 .to_export          = f.to_export,
                 .set_action         = f.set_action,
-                .set_anchor         = f.set_anchor,
-                .get_anchor         = f.get_anchor,
                 .get_size           = f.get_size,
-                .get_areas          = f.get_areas,
+                .get_borders        = f.get_borders,
                 .get_renderer       = f.get_renderer,
                 .set_property_str   = f.set_property_str,
                 .set_property_int   = f.set_property_int,
@@ -198,25 +185,6 @@ pub const Widget = struct {
                 }
                 fn destroy(iwgt: I.WdgPtr) callconv(.C) void {
                     funcs.destroy(@ptrCast(IPtr, iwgt));
-                }
-                fn set_junction_point(iwgt: I.WdgPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool {
-                    if(idx > 1) return false;
-                    const i = @ptrCast(IPtr, iwgt);
-                    var anchor = funcs.get_anchor(i);
-                    anchor.b[idx] = Binding{
-                        .p = R.IPoint{ .x = @intCast(i16, parX), .y = @intCast(i16, parY), },
-                        .c = R.IPoint{ .x = @intCast(i16, chX), .y = @intCast(i16, chY), },
-                    };
-                    funcs.set_anchor(i, anchor);
-                    return true;
-                }
-                fn reset_junction_point(iwgt: I.WdgPtr, idx: u8) callconv(.C) bool {
-                    if(idx > 1) return false;
-                    const i = @ptrCast(IPtr, iwgt);
-                    const bind = funcs.get_anchor(i).b[@intCast(u1, idx) +% 1];
-                    const anchor = Anchor{ .b = .{ bind, bind } };
-                    funcs.set_anchor(i, anchor);
-                    return true;
                 }
                 fn set_property_str(iwgt: I.WdgPtr, name: F.String, value: F.String) callconv(.C) bool {
                     const i = @ptrCast(IPtr, iwgt);
@@ -254,8 +222,6 @@ pub const Widget = struct {
                 .create               = exp.create,
                 .destroy              = exp.destroy,
                 .convert              = exp.convert,
-                .set_junction_point   = exp.set_junction_point,
-                .reset_junction_point = exp.reset_junction_point,
                 .set_property_str     = exp.set_property_str,
                 .set_property_int     = exp.set_property_int,
                 .set_property_flt     = exp.set_property_flt,
@@ -267,67 +233,99 @@ pub const Widget = struct {
         }
     };
 
-    pub const Binding = struct {
-        p: R.IPoint = .{}, // Position inside parent widget
-        c: R.IPoint = .{}, // Position insize current widget
-    };
-
-    pub const SrcDstArea = struct {
-        src: R.IRect,
-        dst: R.IRect,
-    };
-
-    pub const Anchor = struct {
-        b: [2]Binding = .{ .{}, .{}},
-
-        fn isXStretched(a: Anchor) bool {
-            return a.b[0].c.x != a.b[1].c.x;
-        }
-
-        fn isYStretched(a: Anchor) bool {
-            return a.b[0].c.y != a.b[1].c.y;
-        }
-
-        fn get_sd_area(a: Anchor, srcWgt: R.IRect, dstWgt: R.IRect) SrcDstArea {
-            var stX: f32 = 1.0;
-            var stY: f32 = 1.0;
-            if (a.isXStretched())
-                stX = @intToFloat(f32, a.b[0].p.x - a.b[1].p.x)/@intToFloat(f32, a.b[0].c.x - a.b[1].c.x);
-            if (a.isYStretched())
-                stY = @intToFloat(f32, a.b[0].p.y - a.b[1].p.y)/@intToFloat(f32, a.b[0].c.y - a.b[1].c.y);
-            const initX = @intToFloat(f32, dstWgt.x) + @intToFloat(f32, a.b[0].p.x) - @intToFloat(f32, a.b[0].c.x)*stX;
-            const initY = @intToFloat(f32, dstWgt.y) + @intToFloat(f32, a.b[0].p.y) - @intToFloat(f32, a.b[0].c.y)*stY;
-            const targArea = R.IRect{
-                .x = @floatToInt(i16, initX),
-                .y = @floatToInt(i16, initY),
-                .w = @floatToInt(i16, @intToFloat(f32, srcWgt.w)*stX),
-                .h = @floatToInt(i16, @intToFloat(f32, srcWgt.h)*stY),
-            };
-            const dst = dstWgt.overlay(targArea);
-            const src = .{
-                .x = srcWgt.x,
-                .y = srcWgt.y,
-                .w = @floatToInt(i16, @intToFloat(f32, dst.w)/stX),
-                .h = @floatToInt(i16, @intToFloat(f32, dst.h)/stY),
-            };
-            return .{
-                .dst = dst,
-                .src = src,
-            };
-        }
-    };
-
     const ChildVec = Vector(Widget);
 
     const Base = struct {
         renderer: R.Renderer = undefined,
         children: ChildVec = .{},
-        anchor:   Anchor   = .{},
+        borders:  Borders  = .{},
         size:     R.Size = .{},
 
         fn add_child(this: *Base, wid: Widget) Error!void {
             const elem = this.*.children.addOne(gui.allocator) catch return Error.OutOfMemory;
             elem.* = wid;
+        }
+        fn set_property_borders(this: *Base, name: []const u8, value: f64) bool {
+            if (std.mem.eql(u8, name, "left border")) {
+                this.borders.left = @floatCast(f32, value);
+                this.borders.update();
+                return true;
+            }
+            if (std.mem.eql(u8, name, "right border")) {
+                this.borders.right = @floatCast(f32, value);
+                this.borders.update();
+                return true;
+            }
+            if (std.mem.eql(u8, name, "top border")) {
+                this.borders.top = @floatCast(f32, value);
+                this.borders.update();
+                return true;
+            }
+            if (std.mem.eql(u8, name, "bottom border")) {
+                this.borders.bottom = @floatCast(f32, value);
+                this.borders.update();
+                return true;
+            }
+            return false;
+        }
+    };
+
+    const Borders = struct {
+        left:   f32 = 0.0,
+        right:  f32 = 1.0,
+        top:    f32 = 0.0,
+        bottom: f32 = 1.0,
+
+        sdX: f32 = undefined,
+        sdY: f32 = undefined,
+        sdW: f32 = undefined,
+        sdH: f32 = undefined,
+        ssX: f32 = undefined,
+        ssY: f32 = undefined,
+        ssW: f32 = undefined,
+        ssH: f32 = undefined,
+
+        fn update(this: *Borders) void {
+            const min = std.math.min;
+            const max = std.math.max;
+            {
+                const left = min(max(this.left, 0.0), 1.0);
+                const right = min(max(this.right, 0.0), 1.0);
+                this.sdX = left;
+                this.sdW = max(right - left, 0.0);
+            }
+            {
+                const top = min(max(this.top, 0.0), 1.0);
+                const bottom = min(max(this.bottom, 0.0), 1.0);
+                this.sdY = top;
+                this.sdH = max(bottom - top, 0.0);
+            }
+            {
+                const scale: f32 = 1.0/(this.right-this.left);
+                this.ssX = min(max(-this.left*scale, 0.0), 1.0);
+                this.ssW = 1.0 - min(max((this.right-1.0)*scale, 0.0) + max(-this.left*scale, 0.0), 1.0);
+            }
+            {
+                const scale: f32 = 1.0/(this.bottom-this.top);
+                this.ssY = min(max(-this.top*scale, 0.0), 1.0);
+                this.ssH = 1.0 - min(max((this.bottom-1.0)*scale, 0.0) + max(-this.top*scale, 0.0), 1.0);
+            }
+        }
+        fn get_destination_area(this: Borders, area: R.FRect) R.FRect {
+            return .{
+                .x = area.x + this.sdX*area.w,
+                .y = area.y + this.sdY*area.h,
+                .w = this.sdW*area.w,
+                .h = this.sdH*area.h,
+            };
+        }
+        fn get_source_area(this: Borders, source: R.IRect) R.IRect {
+            return .{
+                .x = source.x + @floatToInt(i16, @round(this.ssX*@intToFloat(f32, source.w))),
+                .y = source.y + @floatToInt(i16, @round(this.ssY*@intToFloat(f32, source.h))),
+                .w = @floatToInt(i16, @round(this.ssW*@intToFloat(f32, source.w))),
+                .h = @floatToInt(i16, @round(this.ssH*@intToFloat(f32, source.h))),
+            };
         }
     };
 
@@ -348,17 +346,11 @@ pub const Widget = struct {
     pub fn set_action(wid: Widget, name: []const u8, action: F.Action) bool {
         return wid.vptr.set_action(wid.inst, name, action);
     }
-    pub fn set_anchor(wid: Widget, anchor: Anchor) void {
-        return wid.vptr.set_anchor(wid.inst, anchor);
-    }
-    pub fn get_anchor(wid: Widget) Anchor {
-        return wid.vptr.get_anchor(wid.inst);
-    }
     pub fn get_size(wid: Widget) R.Size {
         return wid.vptr.get_size(wid.inst);
     }
-    pub fn get_areas(wid: Widget, parArea: R.IRect) SrcDstArea {
-        return wid.vptr.get_areas(wid.inst, parArea);
+    pub fn get_borders(wid: Widget) Borders {
+        return wid.vptr.get_borders(wid.inst);
     }
     pub fn get_renderer(wid: Widget) R.Renderer {
         return wid.vptr.get_renderer(wid.inst);
@@ -381,8 +373,8 @@ pub const Widget = struct {
     pub fn get_property_flt(wid: Widget, name: []const u8) f64 {
         return wid.vptr.get_property_flt(wid.inst, name);
     }
-    pub fn update(wid: Widget, areas: Widget.SrcDstArea) Error!void {
-        return wid.vptr.update(wid.inst, areas);
+    pub fn update(wid: Widget, curArea: R.FRect) Error!void {
+        return wid.vptr.update(wid.inst, curArea);
     }
     pub fn updated(wid: Widget, rend: R.Renderer) Error!void {
         return wid.vptr.update(wid.inst, rend);
@@ -409,7 +401,7 @@ pub const MainWindow = struct {
     }
     pub fn run_update_all(this: *MainWindow) Error!void {
         const w = this.widgetInst;
-        return w.update(undefined);
+        return w.update(this.b.size.toRect().toFloat());
     }
     pub fn create(title: []const u8, size: R.Size) Error!*MainWindow {
         const w = R.Window.create(title, size, R.Window.Flags{ .opengl = 1, })
@@ -488,8 +480,8 @@ pub const MainWindow = struct {
         _ = this;
         _ = pos;
     }
-    fn update(this: *MainWindow, areas: Widget.SrcDstArea) Error!void {
-        _ = areas;
+    fn update(this: *MainWindow, curArea: R.FRect) Error!void {
+        _ = curArea;
         this.b.renderer.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return gui.convert_sdl2_error(e);
     }
     fn updated(this: *MainWindow) Error!void {
@@ -551,7 +543,7 @@ const Sandbox = struct {
     const FatMapPoint = packed struct {
         b: i24 = 0,
         l: u8 = 0,
-        
+
         fn set(i: i32) FatMapPoint {
             return @bitCast(FatMapPoint, i);
         }
@@ -579,7 +571,7 @@ const Sandbox = struct {
         sandbox.* = .{
             .b = .{
                 .renderer = rend,
-                .size = .{ .x = 0, .y = 0, },
+                .size = .{ .x = 64, .y = 64, },
             }
         };
         sandbox.uTxs.append(gui.allocator, gui.textures.get_labeled("./texture/tower.bmp") orelse unreachable)
@@ -616,10 +608,7 @@ const Sandbox = struct {
         return false;
     }
     fn set_property_flt(this: *Sandbox, name: []const u8, value: f64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
+        return this.b.set_property_borders(name, value);
     }
     fn get_property_str(this: *const Sandbox, name: []const u8) callconv(.Inline) []const u8 {
         _ = this;
@@ -636,9 +625,10 @@ const Sandbox = struct {
         _ = name;
         return 0.0;
     }
-    fn update(this: *Sandbox, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
-        _ = areas;
-        this.b.renderer.copyFull(gui.buttonTemplate) catch |e| return gui.convert_sdl2_error(e);
+    fn update(this: *Sandbox, curArea: R.FRect) Error!void {
+        _ = curArea;
+        const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
+        this.b.renderer.copyPartial(gui.buttonTemplate, srcArea) catch |e| return gui.convert_sdl2_error(e);
     }
     fn updated(this: *Sandbox) callconv(.Inline) Error!void {
         _ = this;
@@ -707,10 +697,7 @@ const Toolbox = struct {
         return false;
     }
     fn set_property_flt(this: *Toolbox, name: []const u8, value: f64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
+        return this.b.set_property_borders(name, value);
     }
     fn get_property_str(this: *const Toolbox, name: []const u8) callconv(.Inline) []const u8 {
         _ = this;
@@ -727,9 +714,10 @@ const Toolbox = struct {
         _ = name;
         return 0.0;
     }
-    fn update(this: *Toolbox, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
-        _ = areas;
-        this.b.renderer.copyFull(gui.buttonTemplate) catch |e| return gui.convert_sdl2_error(e);
+    fn update(this: *Toolbox, curArea: R.FRect) Error!void {
+        _ = curArea;
+        const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
+        this.b.renderer.copyPartial(gui.buttonTemplate, srcArea) catch |e| return gui.convert_sdl2_error(e);
     }
     fn updated(this: *Toolbox) callconv(.Inline) Error!void {
         _ = this;
@@ -796,7 +784,7 @@ const Button = struct {
                 this.*.b.renderer.setTarget(this.*.texture)
                     catch |e| return gui.convert_sdl2_error(e);
                 defer this.*.b.renderer.freeTarget() catch unreachable;
-                this.*.b.renderer.copyOriginal(texttex, inscribed) catch |e| return gui.convert_sdl2_error(e);
+                this.*.b.renderer.copyOriginal(texttex, inscribed.toFloat()) catch |e| return gui.convert_sdl2_error(e);
             }
         }
     }
@@ -829,10 +817,7 @@ const Button = struct {
         return false;
     }
     fn set_property_flt(this: *Button, name: []const u8, value: f64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
+        return this.b.set_property_borders(name, value);
     }
     fn get_property_str(this: *const Button, name: []const u8) callconv(.Inline) []const u8 {
         if (std.mem.eql(u8, name, "label")) {
@@ -850,9 +835,10 @@ const Button = struct {
         _ = name;
         return 0.0;
     }
-    fn update(this: *Button, areas: Widget.SrcDstArea) callconv(.Inline) Error!void {
-        this.b.renderer.copyPartial(this.texture, areas.src) catch |e| return gui.convert_sdl2_error(e);
-        _ = this;
+    fn update(this: *Button, curArea: R.FRect) Error!void {
+        _ = curArea;
+        const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
+        this.b.renderer.copyPartial(this.texture, srcArea) catch |e| return gui.convert_sdl2_error(e);
     }
     fn updated(this: *Button) callconv(.Inline) Error!void {
         _ = this;
@@ -862,3 +848,135 @@ const Button = struct {
         _ = pos;
     }
 };
+
+pub fn nearf(lhs: f32, rhs: f32, tolerance: f32) bool {
+    return lhs - tolerance <= rhs and lhs + tolerance >= rhs;
+}
+
+test "widget borders and scaling" {
+    const expect = std.testing.expect;
+    const source = R.IRect{
+        .x = 100,
+        .y = 100,
+        .w = 100,
+        .h = 100,
+    };
+    const destination = R.FRect{
+        .x = 200,
+        .y = 200,
+        .w = 200,
+        .h = 200,
+    };
+    {
+        var borders = Widget.Borders{
+            .left = -1.1,
+            .right = -0.1,
+            .top = -0.9,
+            .bottom = 0.1,
+        };
+        borders.update();
+        try expect(nearf(borders.ssX, 1.0, 0.001));
+        try expect(nearf(borders.ssW, 0.0, 0.001));
+        try expect(nearf(borders.ssY, 0.9, 0.001));
+        try expect(nearf(borders.ssH, 0.1, 0.001));
+        try expect(nearf(borders.sdX, 0.0, 0.001));
+        try expect(nearf(borders.sdW, 0.0, 0.001));
+        try expect(nearf(borders.sdY, 0.0, 0.001));
+        try expect(nearf(borders.sdH, 0.1, 0.001));
+
+        const s = borders.get_source_area(source);
+        const d = borders.get_destination_area(destination);
+        try expect(s.x == 200);
+        try expect(s.w == 0);
+        try expect(s.y == 190);
+        try expect(s.h == 10);
+        try expect(d.x == 200);
+        try expect(d.w == 0);
+        try expect(d.y == 200);
+        try expect(d.h == 20);
+    }
+    {
+        var borders = Widget.Borders{
+            .left = -1.5,
+            .right = 0.5,
+            .top = -1.5,
+            .bottom = -1.0,
+        };
+        borders.update();
+        try expect(nearf(borders.ssX, 0.75, 0.001));
+        try expect(nearf(borders.ssW, 0.25, 0.001));
+        try expect(nearf(borders.ssY, 1.0, 0.001));
+        try expect(nearf(borders.ssH, 0.0, 0.001));
+        try expect(nearf(borders.sdX, 0.0, 0.001));
+        try expect(nearf(borders.sdW, 0.5, 0.001));
+        try expect(nearf(borders.sdY, 0.0, 0.001));
+        try expect(nearf(borders.sdH, 0.0, 0.001));
+
+        const s = borders.get_source_area(source);
+        const d = borders.get_destination_area(destination);
+        try expect(s.x == 175);
+        try expect(s.w == 25);
+        try expect(s.y == 200);
+        try expect(s.h == 0);
+        try expect(d.x == 200);
+        try expect(d.w == 100);
+        try expect(d.y == 200);
+        try expect(d.h == 0);
+    }
+    {
+        var borders = Widget.Borders{
+            .left = 0.25,
+            .right = 0.75,
+            .top = -0.5,
+            .bottom = 1.5,
+        };
+        borders.update();
+        try expect(nearf(borders.ssX, 0.0, 0.001));
+        try expect(nearf(borders.ssW, 1.0, 0.001));
+        try expect(nearf(borders.ssY, 0.25, 0.001));
+        try expect(nearf(borders.ssH, 0.5, 0.001));
+        try expect(nearf(borders.sdX, 0.25, 0.001));
+        try expect(nearf(borders.sdW, 0.5, 0.001));
+        try expect(nearf(borders.sdY, 0.0, 0.001));
+        try expect(nearf(borders.sdH, 1.0, 0.001));
+
+        const s = borders.get_source_area(source);
+        const d = borders.get_destination_area(destination);
+        try expect(s.x == 100);
+        try expect(s.w == 100);
+        try expect(s.y == 125);
+        try expect(s.h == 50);
+        try expect(d.x == 250);
+        try expect(d.w == 100);
+        try expect(d.y == 200);
+        try expect(d.h == 200);
+    }
+    {
+        var borders = Widget.Borders{
+            .left = 0.5,
+            .right = 2.5,
+            .top = 1.5,
+            .bottom = 2,
+        };
+        borders.update();
+        try expect(nearf(borders.ssX, 0.0, 0.001));
+        try expect(nearf(borders.ssW, 0.25, 0.001));
+        try expect(nearf(borders.ssY, 0.0, 0.001));
+        try expect(nearf(borders.ssH, 0.0, 0.001));
+        try expect(nearf(borders.sdX, 0.5, 0.001));
+        try expect(nearf(borders.sdW, 0.5, 0.001));
+        try expect(nearf(borders.sdY, 1.0, 0.001));
+        try expect(nearf(borders.sdH, 0.0, 0.001));
+
+        const s = borders.get_source_area(source);
+        const d = borders.get_destination_area(destination);
+        try expect(s.x == 100);
+        try expect(s.w == 25);
+        try expect(s.y == 100);
+        try expect(s.h == 0);
+        try expect(d.x == 300);
+        try expect(d.w == 100);
+        try expect(d.y == 400);
+        try expect(d.h == 0);
+    }
+}

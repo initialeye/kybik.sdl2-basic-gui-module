@@ -40,8 +40,6 @@ pub const WidgetVirtual = extern struct {
     create: fn(WdgPtr, Fw.String) callconv(.C) Widget,
     destroy: fn(WdgPtr) callconv(.C) void,
     convert: fn(WdgPtr, InterfaceId) callconv(.C) GenericInterface,
-    set_junction_point: fn(WdgPtr, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) callconv(.C) bool,
-    reset_junction_point: fn(WdgPtr, u8) callconv(.C) bool,
     set_property_str: fn(WdgPtr, Fw.String, Fw.String) callconv(.C) bool,
     set_property_int: fn(WdgPtr, Fw.String, i64) callconv(.C) bool,
     set_property_flt: fn(WdgPtr, Fw.String, f64) callconv(.C) bool,
@@ -80,12 +78,6 @@ pub const Widget = extern struct {
     }
     pub fn convert(w: Widget, i: InterfaceId) GenericInterface {
         return w.vptr.convert(w.data, i);
-    }
-    pub fn set_junction_point(w: Widget, parX: i32, parY: i32, chX: i32, chY: i32, idx: u8) bool {
-        return w.vptr.set_junction_point(w.data, parX, parY, chX, chY, idx);
-    }
-    pub fn reset_junction_point(w: Widget, idx: u8) bool {
-        return w.vptr.reset_junction_point(w.data, idx);
     }
     pub fn set_property_str(w: Widget, name: Fw.String, value: Fw.String) bool {
         return w.vptr.set_property_str(w.data, name, value);

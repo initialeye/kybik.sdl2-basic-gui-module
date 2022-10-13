@@ -25,7 +25,7 @@ pub fn build(b: *std.build.Builder) void {
     const lib = b.addSharedLibrary("kybik_basic_gui_sdl2", "src/gui.zig", .unversioned);
     lib.setBuildMode(mode);
     lib.install();
-    
+
     lib.addPackage(pkgs.kybik);
     lib.addPackage(pkgs.sdl2);
     lib.addPackage(pkgs.sdl_image);
@@ -33,4 +33,17 @@ pub fn build(b: *std.build.Builder) void {
     lib.linkSystemLibrary("SDL2");
     lib.linkSystemLibrary("SDL2_image");
     lib.linkSystemLibrary("SDL2_ttf");
+
+    const widget_tests = b.addTest("src/widget.zig");
+    widget_tests.addPackage(pkgs.kybik);
+    widget_tests.addPackage(pkgs.sdl2);
+    widget_tests.addPackage(pkgs.sdl_image);
+    widget_tests.addPackage(pkgs.sdl_ttf);
+    widget_tests.linkSystemLibrary("SDL2");
+    widget_tests.linkSystemLibrary("SDL2_image");
+    widget_tests.linkSystemLibrary("SDL2_ttf");
+    widget_tests.setBuildMode(mode);
+
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&widget_tests.step);
 }

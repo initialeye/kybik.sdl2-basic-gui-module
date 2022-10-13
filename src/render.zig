@@ -12,6 +12,7 @@ pub const Surface = sdl2.Surface;
 pub const Texture = sdl2.Texture;
 pub const Size   = sdl2.Size;
 pub const IRect  = sdl2.IRect;
+pub const FRect  = sdl2.FRect;
 pub const IPoint = sdl2.IPoint;
 pub const Font   = ttf.Font;
 
