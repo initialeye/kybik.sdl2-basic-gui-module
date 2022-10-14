@@ -520,18 +520,34 @@ const Sandbox = struct {
             height: FatMapPoint,
         };
         const CellList = std.MultiArrayList(Cell);
+
         mesh: CellList = .{},
-        width: u32 = 0,
+        w: u32 = 0,
 
         fn create(w: u32, h: u32, usedTextureId: u32) MapMesh {
-            return .{
-                .width = w,
-                .mesh = CellList.resize(gui.allocator, w*h),
-                .texId = usedTextureId,
+            var ret = MapMesh{
+                .w = w,
+                .mesh = .{},
             };
+            ret.mesh.resize(gui.allocator, w*h) catch unreachable;
+            var i:usize = 0;
+            while (i < ret.mesh.len) : (i += 1) {
+                ret.mesh.set(i, .{.texId = usedTextureId, .height = .{}});
+            }
+            return ret;
         }
         fn destroy(this: *MapMesh) void {
             this.mesh.deinit(gui.allocator);
+        }
+        fn get(this: *const MapMesh, x: u32, y: u32) Cell {
+            const idx = this.w*y+x;
+            std.debug.assert(idx<this.mesh.len);
+            return this.mesh.get(y*this.w+x);
+        }
+        fn set(this: *MapMesh, x: u32, y: u32, c: Cell) void {
+            const idx = this.w*y+x;
+            std.debug.assert(idx<this.mesh.len);
+            this.mesh.set(idx, c);
         }
         fn width(this: *const MapMesh) u32 {
             return this.w;
@@ -569,6 +585,7 @@ const Sandbox = struct {
     fn create(rend: R.Renderer) Error!Widget {
         var sandbox = gui.allocator.create(Sandbox) catch return Error.OutOfMemory;
         sandbox.* = .{
+            .mapm = MapMesh.create(16, 16, 1),
             .b = .{
                 .renderer = rend,
                 .size = .{ .x = 64, .y = 64, },
@@ -582,6 +599,7 @@ const Sandbox = struct {
     }
     fn destroy(this: *Sandbox) callconv(.Inline) void {
         this.uTxs.deinit(gui.allocator);
+        this.mapm.destroy();
         gui.allocator.destroy(this);
     }
     fn convertWidget(this: *Sandbox, iid: I.InterfaceId) I.GenericInterface {
@@ -629,6 +647,24 @@ const Sandbox = struct {
         _ = curArea;
         const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
         this.b.renderer.copyPartial(gui.buttonTemplate, srcArea) catch |e| return gui.convert_sdl2_error(e);
+        var i: u32 = 0;
+        var n: u32 = 0;
+        var dstArea = R.FRect{
+            .x = 0,
+            .y = 0,
+            .w = curArea.w/@intToFloat(f32, this.mapm.width()),
+            .h = curArea.h/@intToFloat(f32, this.mapm.height()),
+        };
+        while (n < this.mapm.height()) : (n += 1) {
+            i = 0;
+            while (i < this.mapm.width()) : (i += 1) {
+                dstArea.x = @intToFloat(f32, i)*dstArea.w;
+                dstArea.y = @intToFloat(f32, n)*dstArea.h;
+                const texture = this.uTxs.items[this.mapm.get(n, i).texId];
+                this.b.renderer.copyOriginal(texture.text, dstArea)
+                    catch |e| return gui.convert_sdl2_error(e);
+            }
+        }
     }
     fn updated(this: *Sandbox) callconv(.Inline) Error!void {
         _ = this;
