@@ -50,11 +50,16 @@ pub const TextureStorage = struct {
         const fullpath = std.fs.path.joinZ(gui.allocator, paths[0..]) catch return gui.Error.OutOfMemory;
         defer gui.allocator.free(fullpath);
         const partpath = std.fs.path.join(gui.allocator, pathsPartial[0..]) catch return gui.Error.OutOfMemory;
-        
-        const tex = image.loadTexture(rend, fullpath) catch return gui.Error.TextureLoadFailed;
-        errdefer tex.destroy();
+        errdefer gui.allocator.free(partpath);
+
         var v = this.data.getOrPut(gui.allocator, partpath) catch return gui.Error.OutOfMemory;
-        v.value_ptr.* = tex;
+        if (!v.found_existing) {
+            const tex = image.loadTexture(rend, fullpath) catch return gui.Error.TextureLoadFailed;
+            errdefer tex.destroy();
+            v.value_ptr.* = tex;
+        } else {
+            gui.allocator.free(partpath);
+        }
         return v.value_ptr.*;
     }
     pub fn get(this: *@This(), file: []const u8) ?Texture {
