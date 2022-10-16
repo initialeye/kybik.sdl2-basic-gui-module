@@ -468,49 +468,6 @@ pub const MainWindow = struct {
             else => return I.GenericInterface.zero,
         };
     }
-    fn set_action(this: *MainWindow, name: []const u8, action: F.Action) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = action;
-        return false;
-    }
-    fn set_property_str(this: *MainWindow, name: []const u8, value: []const u8) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
-    fn set_property_int(this: *MainWindow, name: []const u8, value: i64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
-    fn set_property_flt(this: *MainWindow, name: []const u8, value: f64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
-    fn get_property_str(this: *const MainWindow, name: []const u8) callconv(.Inline) []const u8 {
-        _ = this;
-        _ = name;
-        return "";
-    }
-    fn get_property_int(this: *const MainWindow, name: []const u8) callconv(.Inline) i64 {
-        _ = this;
-        _ = name;
-        return 0;
-    }
-    fn get_property_flt(this: *const MainWindow, name: []const u8) callconv(.Inline) f64 {
-        _ = this;
-        _ = name;
-        return 0.0;
-    }
-    fn handle_mouse_click(this: *MainWindow, pos: R.IPoint) void {
-        _ = this;
-        _ = pos;
-    }
     fn update(this: *MainWindow, curArea: R.FRect) Error!void {
         _ = curArea;
         this.b.renderer.clear(.{ .r = 0, .g = 0, .b = 0, .a = 0}) catch |e| return gui.convert_sdl2_error(e);
@@ -638,40 +595,13 @@ const Sandbox = struct {
         _ = this;
         return I.GenericInterface.zero;
     }
-    fn set_action(this: *Sandbox, name: []const u8, action: F.Action) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = action;
-        return false;
-    }
-    fn set_property_str(this: *Sandbox, name: []const u8, value: []const u8) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
-    fn set_property_int(this: *Sandbox, name: []const u8, value: i64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
     fn set_property_flt(this: *Sandbox, name: []const u8, value: f64) callconv(.Inline) bool {
         return this.b.set_property_borders(name, value);
-    }
-    fn get_property_str(this: *const Sandbox, name: []const u8) callconv(.Inline) []const u8 {
-        _ = this;
-        _ = name;
-        return "";
-    }
-    fn get_property_int(this: *const Sandbox, name: []const u8) callconv(.Inline) i64 {
-        _ = this;
-        _ = name;
-        return 0;
     }
     fn get_property_flt(this: *const Sandbox, name: []const u8) callconv(.Inline) f64 {
         _ = this;
         _ = name;
+        //TODO
         return 0.0;
     }
     fn update(this: *Sandbox, curArea: R.FRect) Error!void {
@@ -696,13 +626,6 @@ const Sandbox = struct {
                     catch |e| return gui.convert_sdl2_error(e);
             }
         }
-    }
-    fn updated(this: *Sandbox) callconv(.Inline) Error!void {
-        _ = this;
-    }
-    fn handle_mouse_click(this: *Sandbox, pos: R.IPoint) callconv(.Inline) void {
-        _ = this;
-        _ = pos;
     }
     fn init(this: *Sandbox, width: u32, height: u32) callconv(.Inline) void {
         this.mapm = MapMesh.create(width, height, 0);
@@ -745,53 +668,19 @@ const Toolbox = struct {
         _ = this;
         return I.GenericInterface.zero;
     }
-    fn set_action(this: *Toolbox, name: []const u8, action: F.Action) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = action;
-        return false;
-    }
-    fn set_property_str(this: *Toolbox, name: []const u8, value: []const u8) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
-    fn set_property_int(this: *Toolbox, name: []const u8, value: i64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
     fn set_property_flt(this: *Toolbox, name: []const u8, value: f64) callconv(.Inline) bool {
         return this.b.set_property_borders(name, value);
-    }
-    fn get_property_str(this: *const Toolbox, name: []const u8) callconv(.Inline) []const u8 {
-        _ = this;
-        _ = name;
-        return "";
-    }
-    fn get_property_int(this: *const Toolbox, name: []const u8) callconv(.Inline) i64 {
-        _ = this;
-        _ = name;
-        return 0;
     }
     fn get_property_flt(this: *const Toolbox, name: []const u8) callconv(.Inline) f64 {
         _ = this;
         _ = name;
+        //TODO
         return 0.0;
     }
     fn update(this: *Toolbox, curArea: R.FRect) Error!void {
         _ = curArea;
         const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
         this.b.renderer.copyPartial(gui.buttonTemplate, srcArea) catch |e| return gui.convert_sdl2_error(e);
-    }
-    fn updated(this: *Toolbox) callconv(.Inline) Error!void {
-        _ = this;
-    }
-    fn handle_mouse_click(this: *Toolbox, pos: R.IPoint) callconv(.Inline) void {
-        _ = this;
-        _ = pos;
     }
 };
 
@@ -826,11 +715,6 @@ const Button = struct {
         if (this.label.len != 0) gui.allocator.free(this.label);
         this.texture.destroy();
         gui.allocator.destroy(this);
-    }
-    fn convertWidget(this: *Button, iid: I.InterfaceId) I.GenericInterface {
-        _ = iid;
-        _ = this;
-        return I.GenericInterface.zero;
     }
     fn draw_button(this: *Button) Error!void {
         {
@@ -877,42 +761,25 @@ const Button = struct {
         }
         return false;
     }
-    fn set_property_int(this: *Button, name: []const u8, value: i64) callconv(.Inline) bool {
-        _ = this;
-        _ = name;
-        _ = value;
-        return false;
-    }
     fn set_property_flt(this: *Button, name: []const u8, value: f64) callconv(.Inline) bool {
         return this.b.set_property_borders(name, value);
     }
-    fn get_property_str(this: *const Button, name: []const u8) callconv(.Inline) []const u8 {
-        if (std.mem.eql(u8, name, "label")) {
-            return this.label;
-        }
-        return "";
-    }
-    fn get_property_int(this: *const Button, name: []const u8) callconv(.Inline) i64 {
+    fn get_property_str(this: *const Button, name: []const u8) []const u8 {
         _ = this;
         _ = name;
-        return 0;
+        //TODO
+        return "";
     }
     fn get_property_flt(this: *const Button, name: []const u8) callconv(.Inline) f64 {
         _ = this;
         _ = name;
+        //TODO
         return 0.0;
     }
     fn update(this: *Button, curArea: R.FRect) Error!void {
         _ = curArea;
         const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
         this.b.renderer.copyPartial(this.texture, srcArea) catch |e| return gui.convert_sdl2_error(e);
-    }
-    fn updated(this: *Button) callconv(.Inline) Error!void {
-        _ = this;
-    }
-    fn handle_mouse_click(this: *Button, pos: R.IPoint) callconv(.Inline) void {
-        _ = this;
-        _ = pos;
     }
 };
 
