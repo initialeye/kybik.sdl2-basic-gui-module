@@ -72,7 +72,11 @@ pub const Widget = struct {
                     return this.*.destroy();
                 }
                 fn convert(inst: IPtr, iid: I.InterfaceId) I.GenericInterface {
-                    return @ptrCast(*T, inst).convertWidget(iid);
+                    if (@hasDecl(T, "convertWidget")) {
+                        return @ptrCast(*T, inst).convertWidget(iid);
+                    } else {
+                        return I.GenericInterface.zero;
+                    }
                 }
                 fn to_export(inst: IPtr) I.Widget {
                     const this = @ptrCast(*T, inst);
@@ -80,7 +84,11 @@ pub const Widget = struct {
                 }
                 fn set_action(inst: IPtr, name: []const u8, action: F.Action) bool {
                     var this = @ptrCast(*T, inst);
-                    return this.set_action(name, action);
+                    if (@hasDecl(T, "set_action")) {
+                        return this.set_action(name, action);
+                    } else {
+                        return false;
+                    }
                 }
                 fn get_size(inst: IPtr) R.Size {
                     const this = @ptrCast(*T, inst);
@@ -96,42 +104,66 @@ pub const Widget = struct {
                 }
                 fn set_property_str(inst: IPtr, name: []const u8, value: []const u8) bool {
                     var this = @ptrCast(*T, inst);
-                    return this.set_property_str(name, value);
+                    if (@hasDecl(T, "set_property_str")) {
+                        return this.set_property_str(name, value);
+                    } else {
+                        return false;
+                    }
                 }
                 fn set_property_int(inst: IPtr, name: []const u8, value: i64) bool {
                     var this = @ptrCast(*T, inst);
-                    return this.set_property_int(name, value);
+                    if (@hasDecl(T, "set_property_int")) {
+                        return this.set_property_int(name, value);
+                    } else {
+                        return false;
+                    }
                 }
                 fn set_property_flt(inst: IPtr, name: []const u8, value: f64) bool {
                     var this = @ptrCast(*T, inst);
-                    return this.set_property_flt(name, value);
+                    if (@hasDecl(T, "set_property_flt")) {
+                        return this.set_property_flt(name, value);
+                    } else {
+                        return false;
+                    }
                 }
                 fn get_property_str(inst: IPtr, name: []const u8) []const u8 {
                     const this = @ptrCast(*T, inst);
-                    return this.get_property_str(name);
+                    if (@hasDecl(T, "get_property_str")) {
+                        return this.get_property_str(name);
+                    } else {
+                        return "";
+                    }
                 }
                 fn get_property_int(inst: IPtr, name: []const u8) i64 {
                     const this = @ptrCast(*T, inst);
-                    return this.get_property_int(name);
+                    if (@hasDecl(T, "get_property_int")) {
+                        return this.get_property_int(name);
+                    } else {
+                        return 0;
+                    }
                 }
                 fn get_property_flt(inst: IPtr, name: []const u8) f64 {
                     const this = @ptrCast(*T, inst);
-                    return this.get_property_flt(name);
+                    if (@hasDecl(T, "get_property_flt")) {
+                        return this.get_property_flt(name);
+                    } else {
+                        return 0.0;
+                    }
                 }
                 fn update(inst: IPtr, curArea: R.FRect) Error!void {
                     var this = @ptrCast(*T, inst);
-                    try this.update(curArea);
+                    if (@hasDecl(T, "update")) {
+                        try this.update(curArea);
+                    }
                     for (this.b.children.items) |item| {
                         const targArea = item.get_borders().get_destination_area(curArea);
                         this.b.renderer.setViewport(targArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
                         try item.update(targArea);
                     }
                     this.b.renderer.setViewport(curArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
-                    try this.updated();
-                }
-                fn updated(inst: IPtr) Error!void {
-                    var this = @ptrCast(*T, inst);
-                    this.updated();
+                    if (@hasDecl(T, "updated")) {
+                        try this.updated();
+                    }
                 }
                 fn handle_mouse_click(inst: IPtr, pos: R.IPoint, parentArea: R.IRect) void {
                     var this = @ptrCast(*T, inst);
@@ -142,7 +174,9 @@ pub const Widget = struct {
                             break;
                         }
                     }
-                    this.handle_mouse_click(pos);
+                    if (@hasDecl(T, "handle_mouse_click")) {
+                        this.handle_mouse_click(pos);
+                    }
                 }
             };
         }
@@ -375,9 +409,6 @@ pub const Widget = struct {
     }
     pub fn update(wid: Widget, curArea: R.FRect) Error!void {
         return wid.vptr.update(wid.inst, curArea);
-    }
-    pub fn updated(wid: Widget, rend: R.Renderer) Error!void {
-        return wid.vptr.update(wid.inst, rend);
     }
     pub fn handle_mouse_click(wid: Widget, pos: R.IPoint, parentArea: R.IRect) void {
         return wid.vptr.handle_mouse_click(wid.inst, pos, parentArea);
