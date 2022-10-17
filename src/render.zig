@@ -14,6 +14,7 @@ pub const Size   = sdl2.Size;
 pub const IRect  = sdl2.IRect;
 pub const FRect  = sdl2.FRect;
 pub const IPoint = sdl2.IPoint;
+pub const FPoint = sdl2.FPoint;
 pub const Font   = ttf.Font;
 
 pub fn init() void {
@@ -92,28 +93,28 @@ pub fn drawButtonTemplate(size: sdl2.Size) sdl2.Error!sdl2.Surface {
     defer vertices.deinit(gui.allocator);
     vertices.setCapacity(gui.allocator, 6) catch unreachable;
     vertices.appendAssumeCapacity(.{
-        .pos = sdl2.FPoint{ .x = 0, .y = 0, },
-        .color = sdl2.Color{ .r = 127, .g = 0, .b = 0, .a = 255, },
+        .pos = .{ .x = 0, .y = 0, },
+        .color = .{ .r = 127, .g = 0, .b = 0, .a = 255, },
     });
     vertices.appendAssumeCapacity(.{
-        .pos = sdl2.FPoint{ .x = @intToFloat(f32, size.x), .y = 0, },
-        .color = sdl2.Color{ .r = 127, .g = 0, .b = 127, .a = 255, },
+        .pos = .{ .x = @intToFloat(f32, size.x), .y = 0, },
+        .color = .{ .r = 127, .g = 0, .b = 127, .a = 255, },
     });
     vertices.appendAssumeCapacity(.{
-        .pos = size.toFloat(),
-        .color = sdl2.Color{ .r = 0, .g = 127, .b = 127, .a = 255, },
+        .pos = size.convert(FPoint),
+        .color = .{ .r = 0, .g = 127, .b = 127, .a = 255, },
     });
     vertices.appendAssumeCapacity(.{
-        .pos = sdl2.FPoint{ .x = 0, .y = 0, },
-        .color = sdl2.Color{ .r = 127, .g = 0, .b = 0, .a = 255, },
+        .pos = .{ .x = 0, .y = 0, },
+        .color = .{ .r = 127, .g = 0, .b = 0, .a = 255, },
     });
     vertices.appendAssumeCapacity(.{
-        .pos = sdl2.FPoint{ .x = 0, .y = @intToFloat(f32, size.y), },
-        .color = sdl2.Color{ .r = 0, .g = 127, .b = 0, .a = 255, },
+        .pos = .{ .x = 0, .y = @intToFloat(f32, size.y), },
+        .color = .{ .r = 0, .g = 127, .b = 0, .a = 255, },
     });
     vertices.appendAssumeCapacity(.{
-        .pos = size.toFloat(),
-        .color = sdl2.Color{ .r = 0, .g = 127, .b = 127, .a = 255, },
+        .pos = size.convert(FPoint),
+        .color = .{ .r = 0, .g = 127, .b = 127, .a = 255, },
     });
     try ctx.drawGeometryColor(vertices);
     return surface;

@@ -159,10 +159,10 @@ pub const Widget = struct {
                     }
                     for (this.b.children.items) |item| {
                         const targArea = item.get_borders().get_destination_area(curArea);
-                        this.b.renderer.setViewport(targArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
+                        this.b.renderer.setViewport(targArea.convert(R.IRect)) catch |e| return gui.convert_sdl2_error(e);
                         try item.update(targArea);
                     }
-                    this.b.renderer.setViewport(curArea.toInt()) catch |e| return gui.convert_sdl2_error(e);
+                    this.b.renderer.setViewport(curArea.convert(R.IRect)) catch |e| return gui.convert_sdl2_error(e);
                     if (@hasDecl(T, "updated")) {
                         try this.updated();
                     }
@@ -170,9 +170,9 @@ pub const Widget = struct {
                 fn handle_mouse_click(inst: IPtr, curArea: R.IRect, pos: R.IPoint) void {
                     var this = @ptrCast(*T, inst);
                     for (this.b.children.items) |item| {
-                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
-                        if (pos.inside(targArea.toInt())) {
-                            item.handle_mouse_click(targArea.toInt(), pos);
+                        const targArea = item.get_borders().get_destination_area(curArea.convert(R.FRect));
+                        if (pos.inside(targArea.convert(R.IRect))) {
+                            item.handle_mouse_click(targArea.convert(R.IRect), pos);
                             break;
                         }
                     }
@@ -183,9 +183,9 @@ pub const Widget = struct {
                 fn handle_mouse_move(inst: IPtr, curArea: R.IRect, pos: R.IPoint, delta: R.IPoint) void {
                     var this = @ptrCast(*T, inst);
                     for (this.b.children.items) |item| {
-                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
-                        if (pos.inside(targArea.toInt())) {
-                            item.handle_mouse_move(targArea.toInt(), pos, delta);
+                        const targArea = item.get_borders().get_destination_area(curArea.convert(R.FRect));
+                        if (pos.inside(targArea.convert(R.IRect))) {
+                            item.handle_mouse_move(targArea.convert(R.IRect), pos, delta);
                             break;
                         }
                     }
@@ -196,9 +196,9 @@ pub const Widget = struct {
                 fn handle_mouse_wheel(inst: IPtr, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
                     var this = @ptrCast(*T, inst);
                     for (this.b.children.items) |item| {
-                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
-                        if (pos.inside(targArea.toInt())) {
-                            item.handle_mouse_wheel(targArea.toInt(), pos, dir);
+                        const targArea = item.get_borders().get_destination_area(curArea.convert(R.FRect));
+                        if (pos.inside(targArea.convert(R.IRect))) {
+                            item.handle_mouse_wheel(targArea.convert(R.IRect), pos, dir);
                             break;
                         }
                     }
@@ -469,7 +469,7 @@ pub const MainWindow = struct {
     }
     pub fn run_update_all(this: *MainWindow) Error!void {
         const w = this.widgetInst;
-        return w.update(this.b.size.toRect().toFloat());
+        return w.update(this.b.size.toRect().convert(R.FRect));
     }
     pub fn create(title: []const u8, size: R.Size) Error!*MainWindow {
         const w = R.Window.create(title, size, R.Window.Flags{ .opengl = 1, })
@@ -788,7 +788,7 @@ const Button = struct {
                 this.*.b.renderer.setTarget(this.*.texture)
                     catch |e| return gui.convert_sdl2_error(e);
                 defer this.*.b.renderer.freeTarget() catch unreachable;
-                this.*.b.renderer.copyOriginal(texttex, inscribed.toFloat()) catch |e| return gui.convert_sdl2_error(e);
+                this.*.b.renderer.copyOriginal(texttex, inscribed.convert(R.FRect)) catch |e| return gui.convert_sdl2_error(e);
             }
         }
     }
