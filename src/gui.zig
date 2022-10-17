@@ -232,7 +232,26 @@ fn update(ctx: F.CbCtx) callconv(.C) void {
 pub fn mouse_clicked(winId: u32, pos: R.IPoint) void {
     for(windows.items) |w| {
         if (w.get_id() == winId) {
-            w.widgetInst.handle_mouse_click(pos, w.widgetInst.get_size().toRect());
+            w.window_mouse_click(pos);
+            break;
+        }
+    }
+}
+pub fn mouse_moved(winId: u32, pos: R.IPoint, delta: R.IPoint) void {
+    _ = pos;
+    _ = delta;
+    for(windows.items) |w| {
+        if (w.get_id() == winId) {
+            w.window_mouse_move(pos, delta);
+            break;
+        }
+    }
+}
+pub fn mouse_wheel(winId: u32, direction: i8) void {
+    _ = direction;
+    for(windows.items) |w| {
+        if (w.get_id() == winId) {
+            w.window_mouse_wheel(direction);
             break;
         }
     }

@@ -53,7 +53,9 @@ pub const Widget = struct {
         get_property_int: fn (IPtr, []const u8) i64,
         get_property_flt: fn (IPtr, []const u8) f64,
         update:           fn (IPtr, R.FRect) Error!void,
-        handle_mouse_click: fn (IPtr, R.IPoint, R.IRect) void,
+        handle_mouse_click: fn (IPtr, R.IRect, R.IPoint) void,
+        handle_mouse_move:  fn (IPtr, R.IRect, R.IPoint, R.IPoint) void,
+        handle_mouse_wheel: fn (IPtr, R.IRect, R.IPoint, i8) void,
 
         fn Funcs(T: anytype) type {
             return struct {
@@ -165,17 +167,43 @@ pub const Widget = struct {
                         try this.updated();
                     }
                 }
-                fn handle_mouse_click(inst: IPtr, pos: R.IPoint, parentArea: R.IRect) void {
+                fn handle_mouse_click(inst: IPtr, curArea: R.IRect, pos: R.IPoint) void {
                     var this = @ptrCast(*T, inst);
                     for (this.b.children.items) |item| {
-                        const targArea = item.get_borders().get_destination_area(parentArea.toFloat());
+                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
                         if (pos.inside(targArea.toInt())) {
-                            item.handle_mouse_click(pos,targArea.toInt());
+                            item.handle_mouse_click(targArea.toInt(), pos);
                             break;
                         }
                     }
                     if (@hasDecl(T, "handle_mouse_click")) {
                         this.handle_mouse_click(pos);
+                    }
+                }
+                fn handle_mouse_move(inst: IPtr, curArea: R.IRect, pos: R.IPoint, delta: R.IPoint) void {
+                    var this = @ptrCast(*T, inst);
+                    for (this.b.children.items) |item| {
+                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
+                        if (pos.inside(targArea.toInt())) {
+                            item.handle_mouse_move(targArea.toInt(), pos, delta);
+                            break;
+                        }
+                    }
+                    if (@hasDecl(T, "handle_mouse_move")) {
+                        this.handle_mouse_move(curArea, pos, delta);
+                    }
+                }
+                fn handle_mouse_wheel(inst: IPtr, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
+                    var this = @ptrCast(*T, inst);
+                    for (this.b.children.items) |item| {
+                        const targArea = item.get_borders().get_destination_area(curArea.toFloat());
+                        if (pos.inside(targArea.toInt())) {
+                            item.handle_mouse_wheel(targArea.toInt(), pos, dir);
+                            break;
+                        }
+                    }
+                    if (@hasDecl(T, "handle_mouse_wheel")) {
+                        this.handle_mouse_wheel(curArea, pos, dir);
                     }
                 }
             };
@@ -199,6 +227,8 @@ pub const Widget = struct {
                 .get_property_flt   = f.get_property_flt,
                 .update             = f.update,
                 .handle_mouse_click = f.handle_mouse_click,
+                .handle_mouse_move  = f.handle_mouse_move,
+                .handle_mouse_wheel = f.handle_mouse_wheel,
             };
         }
     };
@@ -410,8 +440,14 @@ pub const Widget = struct {
     pub fn update(wid: Widget, curArea: R.FRect) Error!void {
         return wid.vptr.update(wid.inst, curArea);
     }
-    pub fn handle_mouse_click(wid: Widget, pos: R.IPoint, parentArea: R.IRect) void {
-        return wid.vptr.handle_mouse_click(wid.inst, pos, parentArea);
+    pub fn handle_mouse_click(wid: Widget, curArea: R.IRect, pos: R.IPoint) void {
+        return wid.vptr.handle_mouse_click(wid.inst, curArea, pos);
+    }
+    pub fn handle_mouse_move(wid: Widget, curArea: R.IRect, pos: R.IPoint, delta: R.IPoint) void {
+        return wid.vptr.handle_mouse_move(wid.inst, curArea, pos, delta);
+    }
+    pub fn handle_mouse_wheel(wid: Widget, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
+        return wid.vptr.handle_mouse_wheel(wid.inst, curArea, pos, dir);
     }
 
     vptr: VPtr,
@@ -422,6 +458,7 @@ pub const MainWindow = struct {
     b: Widget.Base,
     w: R.Window,
     widgetInst: Widget,
+    latestCursorPos: R.Size = .{},
 
     const virtual = Widget.Virtual.generate(MainWindow);
     const vwidget = Widget.Export.generate(MainWindow);
@@ -450,6 +487,16 @@ pub const MainWindow = struct {
             },
         };
         return window;
+    }
+    pub fn window_mouse_click(this: *MainWindow, pos: R.IPoint) void {
+        this.widgetInst.handle_mouse_click(this.widgetInst.get_size().toRect(), pos);
+    }
+    pub fn window_mouse_move(this: *MainWindow, pos: R.IPoint, delta: R.IPoint) void {
+        this.latestCursorPos = pos;
+        this.widgetInst.handle_mouse_move(this.widgetInst.get_size().toRect(), pos, delta);
+    }
+    pub fn window_mouse_wheel(this: *MainWindow, dir: i8) void {
+        this.widgetInst.handle_mouse_wheel(this.widgetInst.get_size().toRect(), this.latestCursorPos, dir);
     }
     fn destroy(this: *MainWindow) void {
         this.b.renderer.destroy();
@@ -638,6 +685,12 @@ const Sandbox = struct {
         const ret = @intCast(u32, this.uTxs.items.len);
         this.uTxs.append(gui.allocator, .{.path = gui.allocator.dupe(tid), .text = texture,});
         return ret;
+    }
+    pub fn handle_mouse_wheel(this: *Sandbox, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
+        _ = this;
+        _ = curArea;
+        _ = pos;
+        _ = dir;
     }
     //fn get_visible_area()
     //fn update_field(vis_area, field_vector);
