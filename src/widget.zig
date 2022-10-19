@@ -182,15 +182,26 @@ pub const Widget = struct {
                 }
                 fn handle_mouse_move(inst: IPtr, curArea: R.IRect, pos: R.IPoint, delta: R.IPoint) void {
                     var this = @ptrCast(*T, inst);
+                    const lastPoint = pos.minus(delta);
                     for (this.b.children.items) |item| {
-                        const targArea = item.get_borders().get_destination_area(curArea.convert(R.FRect));
-                        if (pos.inside(targArea.convert(R.IRect))) {
-                            item.handle_mouse_move(targArea.convert(R.IRect), pos, delta);
-                            break;
+                        const targArea =
+                            item.get_borders().get_destination_area(curArea.convert(R.FRect)).convert(R.IRect);
+                        if (pos.inside(targArea) or lastPoint.inside(targArea)) {
+                            item.handle_mouse_move(targArea, pos, delta);
                         }
                     }
                     if (@hasDecl(T, "handle_mouse_move")) {
                         this.handle_mouse_move(curArea, pos, delta);
+                    }
+                    if (@hasDecl(T, "mouse_cursor_entered")) {
+                        if (!lastPoint.inside(curArea) and pos.inside(curArea)) {
+                            this.mouse_cursor_entered(pos, delta);
+                        }
+                    }
+                    if (@hasDecl(T, "mouse_cursor_leaved")) {
+                        if (lastPoint.inside(curArea) and !pos.inside(curArea)) {
+                            this.mouse_cursor_leaved(pos, delta);
+                        }
                     }
                 }
                 fn handle_mouse_wheel(inst: IPtr, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
@@ -545,6 +556,7 @@ const Sandbox = struct {
     mapm: MapMesh = .{},
     uTxs: Vector(R.LabeledTexture) = .{},
     objs: Vector(Object) = .{},
+    pow: PointOfView = .{},
 
     const virtual = Widget.Virtual.generate(@This());
     const vwidget = Widget.Export.generate(@This());
@@ -552,7 +564,7 @@ const Sandbox = struct {
     const MapMesh = struct {
         const Cell = struct {
             texId: u32,
-            height: FatMapPoint,
+            height: u16,
         };
         const CellList = std.MultiArrayList(Cell);
 
@@ -565,9 +577,10 @@ const Sandbox = struct {
                 .mesh = .{},
             };
             ret.mesh.resize(gui.allocator, w*h) catch unreachable;
-            var i:usize = 0;
+            var i:u32 = 0;
+            _ = usedTextureId;
             while (i < ret.mesh.len) : (i += 1) {
-                ret.mesh.set(i, .{.texId = usedTextureId, .height = .{}});
+                ret.mesh.set(i, .{.texId = i%2, .height = 0});
             }
             return ret;
         }
@@ -591,30 +604,19 @@ const Sandbox = struct {
             return @intCast(u32, this.mesh.len/@intCast(usize, this.w));
         }
     };
-    const FatMapPoint = packed struct {
-        b: i24 = 0,
-        l: u8 = 0,
-
-        fn set(i: i32) FatMapPoint {
-            return @bitCast(FatMapPoint, i);
-        }
-        fn get(p: FatMapPoint) i32 {
-            return @bitCast(i32, p);
-        }
-    };
     pub const PointOfView = struct {
-        posX:   FatMapPoint = .{},
-        posY:   FatMapPoint = .{},
-        deltaX: FatMapPoint = .{},
-        deltaY: FatMapPoint = .{},
+        posX:   f32 = 0.0,
+        posY:   f32 = 0.0,
+        deltaX: f32 = 0.0,
+        deltaY: f32 = 0.0,
         scale: f32 = 1.0,
     };
     const Object = struct {
         texId: u32,
         state: u32,
-        x: FatMapPoint,
-        y: FatMapPoint,
-        z: FatMapPoint,
+        x: f32 = 0.0,
+        y: f32 = 0.0,
+        z: f32 = 0.0,
     };
 
     fn create(rend: R.Renderer) Error!Widget {
@@ -657,17 +659,22 @@ const Sandbox = struct {
         this.b.renderer.copyPartial(gui.buttonTemplate, srcArea) catch |e| return gui.convert_sdl2_error(e);
         var i: u32 = 0;
         var n: u32 = 0;
+        const cellSize = 64.0*this.pow.scale;
+        this.pow.posX += this.pow.deltaX;
+        this.pow.posY += this.pow.deltaY;
         var dstArea = R.FRect{
             .x = 0,
             .y = 0,
-            .w = curArea.w/@intToFloat(f32, this.mapm.width()),
-            .h = curArea.h/@intToFloat(f32, this.mapm.height()),
+            .w = cellSize,
+            .h = cellSize,
         };
         while (n < this.mapm.height()) : (n += 1) {
             i = 0;
             while (i < this.mapm.width()) : (i += 1) {
-                dstArea.x = @intToFloat(f32, i)*dstArea.w;
-                dstArea.y = @intToFloat(f32, n)*dstArea.h;
+                const biasX = this.pow.posX - curArea.w/2.0;
+                const biasY = this.pow.posY - curArea.h/2.0;
+                dstArea.x = @intToFloat(f32, i)*dstArea.w + biasX;
+                dstArea.y = @intToFloat(f32, n)*dstArea.h + biasY;
                 const texture = this.uTxs.items[this.mapm.get(n, i).texId];
                 this.b.renderer.copyOriginal(texture.text, dstArea)
                     catch |e| return gui.convert_sdl2_error(e);
@@ -687,10 +694,34 @@ const Sandbox = struct {
         return ret;
     }
     pub fn handle_mouse_wheel(this: *Sandbox, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
-        _ = this;
         _ = curArea;
         _ = pos;
-        _ = dir;
+        if (dir > 0) {
+            this.pow.scale *= 1.05;
+        } else {
+            this.pow.scale /= 1.05;
+        }
+    }
+    fn mouse_cursor_entered(this: *Sandbox, pos: R.IPoint, delta: R.IPoint) void {
+        _ = pos;
+        _ = delta;
+        this.pow.deltaX = 0;
+        this.pow.deltaY = 0;
+    }
+    fn mouse_cursor_leaved(this: *Sandbox, pos: R.IPoint, delta: R.IPoint) void {
+        _ = pos;
+        if (delta.x > 0) {
+            this.pow.deltaX = -1;
+        }
+        if (delta.x < 0) {
+            this.pow.deltaX = 1;
+        }
+        if (delta.y > 0) {
+            this.pow.deltaY = -1;
+        }
+        if (delta.y < 0) {
+            this.pow.deltaY = 1;
+        }
     }
     //fn get_visible_area()
     //fn update_field(vis_area, field_vector);
