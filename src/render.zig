@@ -29,62 +29,6 @@ pub fn quit() void {
     sdl2.quit();
 }
 
-pub const LabeledTexture = struct {
-    path: []const u8,
-    text: Texture,
-};
-
-pub const TextureStorage = struct {
-    data: std.StringArrayHashMapUnmanaged(Texture) = .{},
-
-    pub fn destroy(this: *@This()) void {
-        var iter = this.data.iterator();
-        while(iter.next()) |entry| {
-            gui.allocator.free(entry.key_ptr.*);
-            entry.value_ptr.destroy();
-        }
-        this.data.deinit(gui.allocator);
-    }
-    pub fn load(this: *@This(), rend: Renderer, file: []const u8) gui.Error!Texture {
-        var paths = [_][]const u8 { gui.resources, "./texture/", file, };
-        var pathsPartial = [_][]const u8 { "./texture/", file, };
-        const fullpath = std.fs.path.joinZ(gui.allocator, paths[0..]) catch return gui.Error.OutOfMemory;
-        defer gui.allocator.free(fullpath);
-        const partpath = std.fs.path.join(gui.allocator, pathsPartial[0..]) catch return gui.Error.OutOfMemory;
-        errdefer gui.allocator.free(partpath);
-
-        var v = this.data.getOrPut(gui.allocator, partpath) catch return gui.Error.OutOfMemory;
-        if (!v.found_existing) {
-            const tex = image.loadTexture(rend, fullpath) catch return gui.Error.TextureLoadFailed;
-            errdefer tex.destroy();
-            v.value_ptr.* = tex;
-        } else {
-            gui.allocator.free(partpath);
-        }
-        return v.value_ptr.*;
-    }
-    pub fn get(this: *@This(), file: []const u8) ?Texture {
-        const e = this.data.getEntry(file) orelse return null;
-        return e.value_ptr.*;
-    }
-    pub fn get_labeled(this: *@This(), file: []const u8) ?LabeledTexture {
-        const e = this.data.getEntry(file) orelse return null;
-        return LabeledTexture{ .text = e.value_ptr.*, .path = file };
-    }
-    pub fn count(this: *@This()) usize {
-        return this.data.keys().len;
-    }
-    pub fn get_index_path(this: *@This(), i: usize) ?[]const u8 {
-        if (i < this.data.keys().len) {
-            const t = this.data.keys();
-            const t1 = t[i];
-            return t1;
-        } else {
-            return null;
-        }
-    }
-};
-
 pub fn drawButtonTemplate(size: sdl2.Size) sdl2.Error!sdl2.Surface {
     var surface = try sdl2.Surface.create(sdl2.Surface.Format.rgba8888, size);
     var ctx = try sdl2.Renderer.createDrawContext(surface);

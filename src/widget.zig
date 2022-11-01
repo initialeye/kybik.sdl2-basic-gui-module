@@ -287,7 +287,7 @@ pub const Widget = struct {
                     return funcs.get_property_flt(i, name.from());
                 }
                 fn get_original() callconv(.C) usize {
-                    return @ptrToInt(&T.virtual);
+                    return @ptrToInt(&T.vprivate);
                 }
             };
         }
@@ -471,7 +471,7 @@ pub const MainWindow = struct {
     widgetInst: Widget,
     latestCursorPos: R.Size = .{},
 
-    const virtual = Widget.Virtual.generate(MainWindow);
+    const vprivate = Widget.Virtual.generate(MainWindow);
     const vwidget = Widget.Export.generate(MainWindow);
     const vwindow = Export.generate();
 
@@ -494,7 +494,7 @@ pub const MainWindow = struct {
             .w = w,
             .widgetInst = .{
                 .inst = @ptrCast(IPtr, window),
-                .vptr = &virtual,
+                .vptr = &vprivate,
             },
         };
         return window;
@@ -554,54 +554,89 @@ pub const MainWindow = struct {
 const Sandbox = struct {
     b: Widget.Base,
     mapm: MapMesh = .{},
-    uTxs: Vector(R.LabeledTexture) = .{},
+    uTxs: Vector(gui.ResourceManager.LabeledTexture) = .{},
     objs: Vector(Object) = .{},
     pow: PointOfView = .{},
 
-    const virtual = Widget.Virtual.generate(@This());
+    const vprivate = Widget.Virtual.generate(@This());
     const vwidget = Widget.Export.generate(@This());
+    const vsandbox = Export.generate();
 
     const MapMesh = struct {
         const Cell = struct {
-            texId: u32,
-            height: u16,
+            texId: u32 = 0,
+            height: u16 = 0,
         };
         const CellList = std.MultiArrayList(Cell);
 
         mesh: CellList = .{},
         w: u32 = 0,
+        h: u32 = 0,
 
-        fn create(w: u32, h: u32, usedTextureId: u32) MapMesh {
+        fn create(w: u32, h: u32) gui.Error!MapMesh {
             var ret = MapMesh{
                 .w = w,
+                .h = h,
                 .mesh = .{},
             };
-            ret.mesh.resize(gui.allocator, w*h) catch unreachable;
-            var i:u32 = 0;
-            _ = usedTextureId;
-            while (i < ret.mesh.len) : (i += 1) {
-                ret.mesh.set(i, .{.texId = i%2, .height = 0});
+            ret.mesh.resize(gui.allocator, w*h) catch return gui.Error.OutOfMemory;
+            var i:usize = 0;
+            var total:usize = w*h;
+            while (i < total) {
+                ret.mesh.set(i, .{});
+                i += 1;
             }
             return ret;
         }
         fn destroy(this: *MapMesh) void {
             this.mesh.deinit(gui.allocator);
         }
-        fn get(this: *const MapMesh, x: u32, y: u32) Cell {
-            const idx = this.w*y+x;
-            std.debug.assert(idx<this.mesh.len);
-            return this.mesh.get(y*this.w+x);
+        fn resize(this: *MapMesh, w: u32, h: u32) gui.Error!void {
+            const thisW = this.width();
+            const thisH = this.height();
+            if (w*h != thisW*thisH) {
+                this.mesh.resize(gui.allocator, w*h) catch return gui.Error.OutOfMemory;
+            }
+            this.w = w;
+            this.h = h;
+            var i:usize = 0;
+            var total:usize = w*h;
+            while (i < total) {
+                this.mesh.set(i, .{});
+                i += 1;
+            }
         }
-        fn set(this: *MapMesh, x: u32, y: u32, c: Cell) void {
-            const idx = this.w*y+x;
-            std.debug.assert(idx<this.mesh.len);
-            this.mesh.set(idx, c);
+        fn x_right(this: *const MapMesh) i32 {
+            return @intCast(i32, this.width()/2);
+        }
+        fn y_bottom(this: *const MapMesh) i32 {
+            return @intCast(i32, this.height()/2);
+        }
+        fn idx(this: *const MapMesh, x: i32, y: i32) usize {
+            return this.width()*@intCast(u32, (y + this.y_bottom())) + @intCast(u32, (x + this.x_right()));
+        }
+        fn get(this: *const MapMesh, x: i32, y: i32) Cell {
+            return this.mesh.get(this.idx(x, y));
+        }
+        fn set(this: *MapMesh, x: i32, y: i32, c: Cell) void {
+            this.mesh.set(this.idx(x, y), c);
+        }
+        fn set_batch(this: *MapMesh, view: *I.MapView) gui.Error!void {
+            if (view.len != this.mesh.len) return gui.Error.InvalidObject;
+            var i: usize = 0;
+            while (i < this.mesh.len) {
+                this.mesh.set(i, .{
+                    .texId = view.data[i].modelId,
+                    .height = 0,
+                });
+                i += 1;
+            }
         }
         fn width(this: *const MapMesh) u32 {
             return this.w;
         }
         fn height(this: *const MapMesh) u32 {
-            return @intCast(u32, this.mesh.len/@intCast(usize, this.w));
+            return this.h;
         }
     };
     pub const PointOfView = struct {
@@ -622,17 +657,14 @@ const Sandbox = struct {
     fn create(rend: R.Renderer) Error!Widget {
         var sandbox = gui.allocator.create(Sandbox) catch return Error.OutOfMemory;
         sandbox.* = .{
-            .mapm = MapMesh.create(16, 16, 1),
+            .mapm = try MapMesh.create(0, 0),
             .b = .{
                 .renderer = rend,
                 .size = .{ .x = 64, .y = 64, },
             }
         };
-        sandbox.uTxs.append(gui.allocator, gui.textures.get_labeled("./texture/tower.bmp") orelse unreachable)
-             catch return Error.OutOfMemory;
-        sandbox.uTxs.append(gui.allocator, gui.textures.get_labeled("./texture/spawner.bmp") orelse unreachable)
-             catch return Error.OutOfMemory;
-        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, sandbox), };
+        sandbox.uTxs.append(gui.allocator, .{ .data = gui.buttonTemplate, .path = "template"} ) catch return Error.OutOfMemory;
+        return Widget{ .vptr = &vprivate, .inst = @ptrCast(IPtr, sandbox), };
     }
     fn destroy(this: *Sandbox) callconv(.Inline) void {
         this.uTxs.deinit(gui.allocator);
@@ -640,9 +672,16 @@ const Sandbox = struct {
         gui.allocator.destroy(this);
     }
     fn convertWidget(this: *Sandbox, iid: I.InterfaceId) I.GenericInterface {
-        _ = iid;
-        _ = this;
-        return I.GenericInterface.zero;
+        return switch(iid) {
+            .Sandbox => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vsandbox), },
+            else => return I.GenericInterface.zero,
+        };
+    }
+    fn convertSandbox(this: *Sandbox, iid: I.InterfaceId) I.GenericInterface {
+        return switch(iid) {
+            .Widget => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vwidget), },
+            else => return I.GenericInterface.zero,
+        };
     }
     fn set_property_flt(this: *Sandbox, name: []const u8, value: f64) callconv(.Inline) bool {
         return this.b.set_property_borders(name, value);
@@ -675,8 +714,10 @@ const Sandbox = struct {
                 const biasY = this.pow.posY - curArea.h/2.0;
                 dstArea.x = @intToFloat(f32, i)*dstArea.w + biasX;
                 dstArea.y = @intToFloat(f32, n)*dstArea.h + biasY;
-                const texture = this.uTxs.items[this.mapm.get(n, i).texId];
-                this.b.renderer.copyOriginal(texture.text, dstArea)
+                const x = @intCast(i32, @intCast(i64, i) - this.mapm.x_right());
+                const y = @intCast(i32, @intCast(i64, n) - this.mapm.y_bottom());
+                const texture = this.uTxs.items[this.mapm.get(x, y).texId];
+                this.b.renderer.copyOriginal(texture.data, dstArea)
                     catch |e| return gui.convert_sdl2_error(e);
             }
         }
@@ -684,14 +725,23 @@ const Sandbox = struct {
     fn init(this: *Sandbox, width: u32, height: u32) callconv(.Inline) void {
         this.mapm = MapMesh.create(width, height, 0);
     }
-    fn register_texture(this: *Sandbox, tid: []const i8) callconv(.Inline) u32 {
-        const texture = gui.textures.get(tid) orelse {
-            gui.handle_error(.ObjectNotFound, @src(), tid);
+    fn set_size(this: *Sandbox, w: u32, h: u32) callconv(.Inline) gui.Error!void {
+        return this.mapm.resize(w, h);
+    }
+    fn register_texture(this: *Sandbox, tid: []const u8) callconv(.Inline) u32 {
+        const texture = gui.resources.get_texture(tid) orelse {
+            gui.handle_error(Error.ObjectNotFound, @src(), tid);
             return 0; //default texture
         };
         const ret = @intCast(u32, this.uTxs.items.len);
-        this.uTxs.append(gui.allocator, .{.path = gui.allocator.dupe(tid), .text = texture,});
+        this.uTxs.append(gui.allocator, texture) catch {
+            gui.handle_error(Error.OutOfMemory, @src(), tid);
+            return 0;
+        };
         return ret;
+    }
+    fn set_map_status(this: *Sandbox, view: *I.MapView) gui.Error!void {
+        return this.mapm.set_batch(view);
     }
     pub fn handle_mouse_wheel(this: *Sandbox, curArea: R.IRect, pos: R.IPoint, dir: i8) void {
         _ = curArea;
@@ -723,15 +773,53 @@ const Sandbox = struct {
             this.pow.deltaY = 1;
         }
     }
-    //fn get_visible_area()
-    //fn update_field(vis_area, field_vector);
-    //fn update_objects(vis_area, obj_vecror);
+    const Export = struct {
+        const Funcs = struct {
+            fn convert(iwgt: I.SandboxPtr, iid: I.InterfaceId) callconv(.C) I.GenericInterface {
+                return Sandbox.convertSandbox(@ptrCast(*Sandbox, iwgt), iid);
+            }
+            fn destroy(iwgt: I.SandboxPtr) callconv(.C) void {
+                Sandbox.destroy(@ptrCast(*Sandbox, iwgt));
+            }
+            fn set_size(iwgt: I.SandboxPtr, w: u32, h: u32) callconv(.C) I.ErrorNum {
+                Sandbox.set_size(@ptrCast(*Sandbox, iwgt), w, h) catch |e| {
+                    gui.handle_error(e, @src(), "");
+                    return I.ErrorNum.OutOfMemory;
+                };
+                return I.ErrorNum.None;
+            }
+            fn add_texture(iwgt: I.SandboxPtr, value: F.String) callconv(.C) u32 {
+                return Sandbox.register_texture(@ptrCast(*Sandbox, iwgt), value.from());
+            }
+            fn set_map_status(iwgt: I.SandboxPtr, view: *I.MapView) callconv(.C) I.ErrorNum {
+                defer view.destroy(view);
+                Sandbox.set_map_status(@ptrCast(*Sandbox, iwgt), view) catch |e| {
+                    gui.handle_error(e, @src(), "");
+                    switch (e) {
+                        Error.OutOfMemory => return I.ErrorNum.OutOfMemory,
+                        Error.InvalidObject => return I.ErrorNum.InvalidObject,
+                        else => {}
+                    }
+                };
+                return I.ErrorNum.None;
+            }
+        };
+        fn generate() I.SandboxVirtual {
+            return .{
+                .convert = Funcs.convert,
+                .destroy = Funcs.destroy,
+                .set_size = Funcs.set_size,
+                .add_texture = Funcs.add_texture,
+                .set_map_status = Funcs.set_map_status,
+            };
+        }
+    };
 };
 
 const Toolbox = struct {
     b: Widget.Base,
 
-    const virtual = Widget.Virtual.generate(Toolbox);
+    const vprivate = Widget.Virtual.generate(Toolbox);
     const vwidget = Widget.Export.generate(Toolbox);
 
     fn create(rend: R.Renderer) Error!Widget {
@@ -742,7 +830,7 @@ const Toolbox = struct {
                 .size = .{ .x = 200, .y = 200, },
             }
         };
-        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, toolbox), };
+        return Widget{ .vptr = &vprivate, .inst = @ptrCast(IPtr, toolbox), };
     }
     fn destroy(this: *Toolbox) callconv(.Inline) void {
         gui.allocator.destroy(this);
@@ -773,13 +861,16 @@ const Button = struct {
     label: [:0]const u8 = "",
     actions: Actions,
     texture: R.Texture,
+    font: R.Font,
+    fontLoaded: bool = false,
 
     const Actions = struct {
         click: F.Action = undefined,
     };
 
-    const virtual = Widget.Virtual.generate(Button);
+    const vprivate = Widget.Virtual.generate(Button);
     const vwidget = Widget.Export.generate(Button);
+    const vexport = Export.generate();
 
     fn create(rend: R.Renderer) Error!Widget {
         var button = gui.allocator.create(Button) catch return Error.OutOfMemory;
@@ -791,9 +882,10 @@ const Button = struct {
             },
             .actions = .{},
             .texture = R.Texture.create(rend, .rgba8888, .target, size) catch |e| return gui.convert_sdl2_error(e),
+            .font = undefined,
         };
         try button.draw_button();
-        return Widget{ .vptr = &virtual, .inst = @ptrCast(IPtr, button), };
+        return Widget{ .vptr = &vprivate, .inst = @ptrCast(IPtr, button), };
     }
     fn destroy(this: *Button) callconv(.Inline) void {
         if (this.label.len != 0) gui.allocator.free(this.label);
@@ -806,8 +898,8 @@ const Button = struct {
             defer this.*.b.renderer.freeTarget() catch unreachable;
             this.*.b.renderer.copyFull(gui.buttonTemplate) catch |e| return gui.convert_sdl2_error(e);
         }
-        if (this.label.len != 0) {
-            const text = gui.font.renderText(this.label, .{ .r = 255, .g = 255, .b = 255, .a = 255, })
+        if (this.label.len != 0 and this.fontLoaded) {
+            const text = this.font.renderText(this.label, .{ .r = 255, .g = 255, .b = 255, .a = 255, })
                 catch |e| return gui.convert_sdl2_error(e);
             defer text.destroy();
             const texttex = R.Texture.createSurface(this.*.b.renderer, text)
@@ -832,15 +924,7 @@ const Button = struct {
     }
     fn set_property_str(this: *Button, name: []const u8, value: []const u8) callconv(.Inline) bool {
         if (std.mem.eql(u8, name, "label")) {
-            if (this.label.len != 0) gui.allocator.free(this.label);
-            this.label = gui.allocator.dupeZ(u8, value) catch |e| {
-                gui.handle_error(e, @src(), "");
-                return false;
-            };
-            this.draw_button() catch |e| {
-                gui.handle_error(e, @src(), "");
-                return false;
-            };
+            this.set_label(value);
             return true;
         }
         return false;
@@ -860,11 +944,65 @@ const Button = struct {
         //TODO
         return 0.0;
     }
+    fn set_label(this: *Button, value: []const u8) void {
+        if (this.label.len != 0) gui.allocator.free(this.label);
+        const label = gui.allocator.dupeZ(u8, value);
+        _ = label catch |e| {
+            gui.handle_error(e, @src(), "");
+        };
+        this.label = label catch "";
+        this.draw_button() catch |e| {
+            gui.handle_error(e, @src(), "");
+        };
+    }
+    fn set_font(this: *Button, font: R.Font) void {
+        this.font = font;
+        this.fontLoaded = true;
+        this.draw_button() catch |e| {
+            gui.handle_error(e, @src(), "");
+        };
+    }
     fn update(this: *Button, curArea: R.FRect) Error!void {
         _ = curArea;
         const srcArea = this.b.borders.get_source_area(this.b.size.toRect());
         this.b.renderer.copyPartial(this.texture, srcArea) catch |e| return gui.convert_sdl2_error(e);
     }
+    fn convertWidget(this: *Button, iid: I.InterfaceId) I.GenericInterface {
+        return switch(iid) {
+            .Button => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vexport), },
+            else => return I.GenericInterface.zero,
+        };
+    }
+    fn convertButton(this: *Button, iid: I.InterfaceId) I.GenericInterface {
+        return switch(iid) {
+            .Widget => return .{ .data = @ptrToInt(this), .vptr = @ptrToInt(&vwidget), },
+            else => return I.GenericInterface.zero,
+        };
+    }
+    const Export = struct {
+        const Funcs = struct {
+            fn convert(iwgt: I.ButtonPtr, iid: I.InterfaceId) callconv(.C) I.GenericInterface {
+                return Button.convertButton(@ptrCast(*Button, iwgt), iid);
+            }
+            fn destroy(iwgt: I.ButtonPtr) callconv(.C) void {
+                Button.destroy(@ptrCast(*Button, iwgt));
+            }
+            fn set_label(iwgt: I.ButtonPtr, value: F.String) callconv(.C) void {
+                Button.set_label(@ptrCast(*Button, iwgt), value.from());
+            }
+            fn set_font(iwgt: I.ButtonPtr, font: I.Font) callconv(.C) void {
+                Button.set_font(@ptrCast(*Button, iwgt), @bitCast(R.Font, @ptrToInt(font)));
+            }
+        };
+        fn generate() I.ButtonVirtual {
+            return .{
+                .convert = Funcs.convert,
+                .destroy = Funcs.destroy,
+                .set_label = Funcs.set_label,
+                .set_font = Funcs.set_font,
+            };
+        }
+    };
 };
 
 pub fn nearf(lhs: f32, rhs: f32, tolerance: f32) bool {

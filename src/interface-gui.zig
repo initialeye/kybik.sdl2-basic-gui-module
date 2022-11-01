@@ -1,8 +1,11 @@
 const Fw = @import("framework.zig");
 
-pub const WinPtr = *align(@alignOf(*void)) opaque{};
-pub const WdgPtr = *align(@alignOf(*void)) opaque{};
-pub const Texture = *opaque{};
+pub const WdgPtr = *align(Fw.stdalign) opaque{};
+pub const WinPtr = *align(Fw.stdalign) opaque{};
+pub const SandboxPtr = *align(Fw.stdalign) opaque{};
+pub const ButtonPtr = *align(Fw.stdalign) opaque{};
+pub const Texture = *align(Fw.stdalign) opaque{};
+pub const Font = *align(Fw.stdalign) opaque{};
 
 pub const API_VERSION:usize = 0;
 pub const INTERFACE_VERSION = Fw.CompatVersion.init(0, 0);
@@ -23,16 +26,40 @@ pub fn get_func_info(fnptr: *const Fw.FnPtr) callconv(.C) Fw.String {
 }
 
 pub const InterfaceId = enum(u32) {
-    Widget,
+    Widget = 0,
     Window,
+    Sandbox,
+    Button,
+};
+pub const ErrorNum = enum(u32) {
+    None = 0,
+    OutOfMemory,
+    InvalidObject,
+};
+pub const ResourceType = enum(u32) {
+    Texture = 0,
+    Surface,
+    Font,
+};
+
+pub const MapView = extern struct {
+    destroy: fn(*MapView) callconv(.C) void,
+    data: [*]Cell,
+    len: usize,
+    ctx: Fw.CbCtx = .{},
+
+    pub const Cell = extern struct {
+        modelId: u32 = 0,
+        status: u32 = 0,
+    };
 };
 
 pub const ModuleVirtual = extern struct {
     create_window: fn(Fw.String, u16, u16) callconv(.C) Widget,
-    load_texture: fn(Fw.String) callconv(.C) ?Texture,
+    load_textures: fn(Fw.String, Fw.String) callconv(.C) u64,
+    load_fonts: fn(Fw.String, Fw.String, u16) callconv(.C) u64,
     get_texture: fn(Fw.String) callconv(.C) ?Texture,
-    get_texture_count: fn() callconv(.C) usize,
-    get_texture_path: fn(usize) callconv(.C) Fw.String,
+    get_font: fn(Fw.String, u16) callconv(.C) ?Font,
     get_texture_size: fn(Texture) callconv(.C) TextureSize,
 };
 
@@ -52,6 +79,21 @@ pub const WidgetVirtual = extern struct {
 pub const WindowVirtual = extern struct {
     destroy: fn(WinPtr) callconv(.C) void,
     convert: fn(WinPtr, InterfaceId) callconv(.C) GenericInterface,
+};
+
+pub const SandboxVirtual = extern struct {
+    destroy: fn(SandboxPtr) callconv(.C) void,
+    convert: fn(SandboxPtr, InterfaceId) callconv(.C) GenericInterface,
+    set_size: fn(SandboxPtr, u32, u32) callconv(.C) ErrorNum,
+    add_texture: fn(SandboxPtr, Fw.String) callconv(.C) u32,
+    set_map_status: fn(SandboxPtr, *MapView) callconv(.C) ErrorNum,
+};
+
+pub const ButtonVirtual = extern struct {
+    destroy: fn(ButtonPtr) callconv(.C) void,
+    convert: fn(ButtonPtr, InterfaceId) callconv(.C) GenericInterface,
+    set_label: fn(ButtonPtr, Fw.String) callconv(.C) void,
+    set_font: fn(ButtonPtr, Font) callconv(.C) void,
 };
 
 pub const GenericInterface = extern struct {
@@ -98,7 +140,6 @@ pub const Widget = extern struct {
         return w.vptr.get_property_flt(w.data, name);
     }
 };
-
 pub const Window = extern struct {
     data: WinPtr,
     vptr: *const WindowVirtual,
@@ -108,5 +149,42 @@ pub const Window = extern struct {
     }
     pub fn convert(w: Window, i: InterfaceId) GenericInterface {
         return w.vptr.convert(w.data, i);
+    }
+};
+pub const Sandbox = extern struct {
+    data: SandboxPtr,
+    vptr: *const SandboxVirtual,
+
+    pub fn destroy(s: Sandbox) void {
+        return s.vptr.destroy(s.data);
+    }
+    pub fn convert(s: Sandbox, i: InterfaceId) GenericInterface {
+        return s.vptr.convert(s.data, i);
+    }
+    pub fn set_size(s: Sandbox, w: u32, h: u32) ErrorNum {
+        return s.vptr.set_size(s.data, w, h);
+    }
+    pub fn add_texture(s: Sandbox, path: Fw.String) u32 {
+        return s.vptr.add_texture(s.data, path);
+    }
+    pub fn set_map_status(s: Sandbox, view: *MapView) ErrorNum {
+        return s.vptr.set_map_status(s.data, view);
+    }
+};
+pub const Button = extern struct {
+    data: ButtonPtr,
+    vptr: *const ButtonVirtual,
+
+    pub fn destroy(b: Button) void {
+        return b.vptr.destroy(b.data);
+    }
+    pub fn convert(b: Button, i: InterfaceId) GenericInterface {
+        return b.vptr.convert(b.data, i);
+    }
+    pub fn set_label(b: Button, label: Fw.String) void {
+        return b.vptr.set_label(b.data, label);
+    }
+    pub fn set_font(b: Button, font: Font) void {
+        return b.vptr.set_font(b.data, font);
     }
 };

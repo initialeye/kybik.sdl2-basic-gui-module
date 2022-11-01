@@ -4,6 +4,7 @@ pub const F = @import("framework.zig");
 pub const W = @import("widget.zig");
 pub const R = @import("render.zig");
 pub const E = @import("events.zig");
+pub const ResourceManager = @import("resource-manager.zig");
 
 pub const Vector = std.ArrayListUnmanaged;
 
@@ -11,9 +12,7 @@ pub var core: *const F.Core = undefined;
 pub var module: F.Module = undefined;
 pub var allocator: std.mem.Allocator = undefined;
 pub var windows: Vector(*W.MainWindow) = .{};
-pub var resources: []const u8 = undefined;
-pub var textures: R.TextureStorage = .{};
-pub var font: R.Font = undefined;
+pub var resources: ResourceManager = .{};
 
 pub var firstWindowCreated = false;
 pub var buttonTemplate: R.Texture = undefined;
@@ -52,10 +51,10 @@ const dependencies = [0]F.Dependency {};
 
 const vptr = I.ModuleVirtual {
     .create_window = Export.create_window,
-    .load_texture = Export.load_texture,
+    .load_textures = Export.load_textures,
+    .load_fonts = Export.load_fonts,
     .get_texture = Export.get_texture,
-    .get_texture_count = Export.get_texture_count,
-    .get_texture_path = Export.get_texture_path,
+    .get_font = Export.get_font,
     .get_texture_size = Export.get_texture_size,
 };
 
@@ -74,6 +73,9 @@ pub const Error = error {
     NoRenderingContext,
     TextureLoadFailed,
     ObjectNotFound,
+    WrongTypeDetected,
+    InvalidIndexAccess,
+    InvalidObject,
 };
 
 pub fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u8) void {
@@ -85,6 +87,9 @@ pub fn handle_error(e: Error, src: std.builtin.SourceLocation, optMsg: []const u
         error.NoRenderingContext => core.log(module, F.LogLevel.Error, F.String.init("Trying to use renderer, but no context found.")),
         error.TextureLoadFailed  => core.log(module, F.LogLevel.Error, F.String.init("Texture load failed.")),
         error.ObjectNotFound     => core.log(module, F.LogLevel.Error, F.String.init("Object not found.")),
+        error.WrongTypeDetected  => core.log(module, F.LogLevel.Error, F.String.init("Object found, but type was wrong.")),
+        error.InvalidIndexAccess => core.log(module, F.LogLevel.Error, F.String.init("Invalid index access detected.")),
+        error.InvalidObject      => core.log(module, F.LogLevel.Error, F.String.init("Invalid object.")),
     }
     _ = optMsg;
 }
@@ -117,17 +122,6 @@ fn init(corePtr: *const F.Core, thisPtr: F.Module) callconv(.C) void {
         .vtable = @ptrCast(*const std.mem.Allocator.VTable, al.vtable),
     };
     R.init();
-    resources = core.get_resource_path(module).from();
-    var paths = [_][]const u8 { resources, "test.ttf", };
-    const fontPath = std.fs.path.joinZ(allocator, paths[0..]) catch {
-        handle_error(Error.OutOfMemory, @src(), "");
-        return;
-    };
-    defer allocator.free(fontPath);
-    font = R.Font.create(fontPath, 20) catch |e| {
-        handle_error(convert_sdl2_error(e), @src(), "");
-        return;
-    };
 }
 
 fn run() callconv(.C) void {
@@ -140,7 +134,7 @@ fn run() callconv(.C) void {
 fn quit() callconv(.C) void {
     mtx.lock();
     defer mtx.unlock();
-    textures.destroy();
+    resources.destroy();
     for (windows.items) |w| {
         w.widgetInst.destroy();
     }
@@ -148,7 +142,6 @@ fn quit() callconv(.C) void {
     if (firstWindowCreated) {
         buttonTemplate.destroy();
     }
-    font.destroy();
     R.quit();
 }
 
@@ -180,26 +173,21 @@ const Export = struct {
         }
         return res.widgetInst.to_export();
     }
-    fn load_texture(path: F.String) callconv(.C) ?I.Texture {
-        if (windows.items.len == 0) {
-            handle_error(Error.NoRenderingContext, @src(), "");
-            return null;
-        }
-        const t = textures.load(windows.items[0].b.renderer, path.from()) catch |e| {
-            handle_error(e, @src(), "");
-            return null;
-        };
-        return @intToPtr(I.Texture, @bitCast(usize, t));
-    }   
+    fn load_textures(folder: F.String, pattern: F.String) callconv(.C) u64 {
+        var ctx: F.CbCtx = undefined;
+        return core.iterate_files(module, folder, pattern, load_textures_cb, ctx);
+    }
+    fn load_fonts(folder: F.String, pattern: F.String, size: u16) callconv(.C) u64 {
+        var ctx: F.CbCtx = .{ .f1 = size, .f2 = null, };
+        return core.iterate_files(module, folder, pattern, load_fonts_cb, ctx);
+    }
     fn get_texture(path: F.String) callconv(.C) ?I.Texture {
-        const t = textures.get(path.from()) orelse return null;
-        return @intToPtr(I.Texture, @bitCast(usize, t));
+        const t = resources.get_texture(path.from()) orelse return null;
+        return @intToPtr(I.Texture, @bitCast(usize, t.data));
     }
-    fn get_texture_count() callconv(.C) usize {
-        return textures.count();
-    }
-    fn get_texture_path(index: usize) callconv(.C) F.String {
-        return F.String.init(textures.get_index_path(index) orelse "");
+    fn get_font(path: F.String, size: u16) callconv(.C) ?I.Font {
+        const f = resources.get_font(path.from(), size) orelse return null;
+        return @intToPtr(I.Font, @bitCast(usize, f.data));
     }
     fn get_texture_size(tex: I.Texture) callconv(.C) I.TextureSize {
         const t = @bitCast(R.Texture, @ptrToInt(tex));
@@ -262,13 +250,19 @@ fn init_after_win_init(r: R.Renderer) R.Error!void {
     const surf = try R.drawButtonTemplate(size);
     defer surf.destroy();
     buttonTemplate = try R.Texture.createSurface(r, surf);
-    load_textures();
 }
 
-fn load_textures() void {
-    core.iterate_files(module, F.String.init("texture"), F.String.init(""), load_textures_cb);
+fn load_textures_cb(name: F.String, fullpath: F.String, ctx: F.CbCtx) callconv(.C) void {
+    _ = ctx;
+    if (windows.items.len == 0) {
+        handle_error(Error.NoRenderingContext, @src(), "");
+    }
+    _ = resources.load_texture(windows.items[0].b.renderer, fullpath.from(), name.from()) catch |e| {
+        handle_error(e, @src(), "");
+    };
 }
-fn load_textures_cb(name: F.String, fullpath: F.String) callconv(.C) void {
-    _ = fullpath;
-    _ = Export.load_texture(name);
+fn load_fonts_cb(name: F.String, fullpath: F.String, ctx: F.CbCtx) callconv(.C) void {
+    _ = resources.create_font(fullpath.from(), name.from(), @intCast(u16, ctx.f1)) catch |e| {
+        handle_error(e, @src(), "");
+    };
 }
